@@ -1,0 +1,28 @@
+# 忽略 Git 历史（非常大且镜像不需要）
+.git
+.gitignore
+
+# 忽略本地虚拟环境（镜像内会自己重新构建）
+.venv/
+node_modules/
+
+# 忽略缓存和临时文件
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 忽略日志和本地数据（防止破坏 Docker 缓存）
+logs/
+data/
+*.log
+
+# 忽略敏感信息
+.env
+.streamlit/secrets.toml
+
+# 忽略 IDE 配置文件
+.idea/
+.vscode/
+.DS_Store

@@ -1,0 +1,5 @@
+FROM python:3.11-alpine
+
+WORKDIR /workspace
+
+CMD ["sh", "-c", "echo 'Sandbox base image placeholder' && sleep infinity"]

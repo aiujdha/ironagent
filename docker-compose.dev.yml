@@ -1,0 +1,12 @@
+services:
+  security-service:
+    volumes:
+      - .:/app
+    command: uv run uvicorn src.main:app --reload --host 0.0.0.0 --port 8000
+
+  admin:
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    command: sh -lc 'PYTHONPATH=/app uv run alembic -c migrations/alembic.ini upgrade head && exec uv run uvicorn src.admin_web.app:app --reload --host 0.0.0.0 --port 8501'

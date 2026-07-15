@@ -1,0 +1,78 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ironagent
+
+resources:
+  - ../runtime-k8s-pvc
+  - mysql.yaml
+  - mysql-backup-cronjob.yaml
+  - mysql-local-pv.yaml
+  - redis.yaml
+  - redis-local-pv.yaml
+  - workspace-local-pv.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: ironagent-gateway-config
+    envs:
+      - config/gateway.env
+  - name: ironagent-cli-config
+    envs:
+      - config/cli.env
+  - name: control-plane-shared-config
+    envs:
+      - config/control-plane-shared.env
+
+secretGenerator:
+  - name: go-gateway-secret
+    envs:
+      - secret/go-gateway.env
+  - name: ironagent-gateway-secret
+    envs:
+      - secret/gateway.env
+  - name: control-plane-shared-secret
+    envs:
+      - secret/control-plane.env
+
+patches:
+  - path: control-plane-k8s-runtime-config-patch.yaml
+    target:
+      kind: ConfigMap
+      name: control-plane-shared-config
+  - path: workspace-pvc-local-patch.yaml
+    target:
+      kind: PersistentVolumeClaim
+      name: assistant-workspaces
+  - path: go-gateway-nodeport-config-patch.yaml
+    target:
+      kind: ConfigMap
+      name: go-gateway-config
+  - path: service-nodeports-go-gateway.yaml
+    target:
+      kind: Service
+      name: go-gateway
+
+replacements:
+  - source:
+      kind: Deployment
+      name: ironagent-gateway
+      fieldPath: spec.template.spec.containers.[name=ironagent-gateway].image
+    targets:
+      - select:
+          kind: ConfigMap
+          name: control-plane-shared-config
+        fieldPaths:
+          - data.IRON_AGENT_RUNTIME_CONTAINER_IMAGE
+          - data.IRON_AGENT_K8S_RUNTIME_INIT_IMAGE
+        options:
+          create: true
+      - select:
+          kind: Deployment
+          name: admin
+        fieldPaths:
+          - spec.template.metadata.annotations.[ironagent.runtime-image]
+        options:
+          create: true

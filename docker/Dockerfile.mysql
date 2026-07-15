@@ -1,0 +1,63 @@
+# IronAgent 定制 MySQL 镜像
+#
+# 目的：在官方 mysql:8.4 之上叠加一层，处理安全团队扫描出的合规项：
+#       1) 将 openssl / openssl-libs / gnutls 替换为 FIPS 140-3 验证版本
+#          （openssl 3.5.1-7.0.1.el9_7_fips、gnutls 3.8.3-10.el9_7_fips）；
+#       2) 升级 MySQL Shell 内嵌 Python 里的 pyOpenSSL 至 26.0.0。
+#
+# 背景：官方 mysql:8.4 底层为 oraclelinux:9-slim，FIPS 版加密库与无后缀版同源
+#       （同一批 CVE 修复），区别仅在于后者是经 NIST CMVP 认证的 FIPS 构建。
+#       安全团队要求统一切到 _fips 构建。
+#
+# 注意：本镜像只把"软件包版本"切到 FIPS 验证版以满足扫描要求，并不等同于让容器
+#       运行在 FIPS 模式（后者还需节点内核 fips=1 与 crypto-policies 设为 FIPS）。
+#
+# 已评估但未在此处理：glibc / glibc-common / glibc-minimal-langpack 的 `ksplice1` 版属于
+#       Oracle Ksplice（需订阅的在线热补丁），与不可变容器范式不符；当前 glibc 已是
+#       OL9 最新基线 patch（2.34-231.0.1.el9_7.10），按"重建镜像取最新基线"处理并向安全团队豁免。
+FROM mysql:8.4
+
+# --- 1) FIPS 加密库替换 ---------------------------------------------------------
+# 目标 FIPS 包版本（安全团队指定）。通过 ARG 暴露，便于后续按新公告升级而无需改 RUN 逻辑。
+ARG OPENSSL_FIPS_VERSION=3.5.1-7.0.1.el9_7_fips
+ARG GNUTLS_FIPS_VERSION=3.8.3-10.el9_7_fips
+
+# 配置 Oracle Linux 9 安全验证仓库并替换 openssl / openssl-libs / gnutls：
+# - FIPS 验证包来自 Oracle 公开仓库（免 ULN 订阅）；OL9 全生命周期的 FIPS 包累积归档在 OL9/3 路径下，
+#   因此 el9_7 的包也在该路径内（直接访问 OL9/7 会 404）。
+# - $basearch 由 dnf 在读取仓库时展开，自动适配 x86_64 / aarch64，两架构该仓库均提供对应 rpm。
+# - _fips 包 epoch=10，会自动覆盖基础镜像中无后缀的同名包。
+# - gpgcheck 沿用基础镜像自带的 Oracle 官方公钥，保持签名校验（合规任务不关闭校验）。
+# - 安装后强制校验版本串，缺失则 build 失败（fail-closed）。
+RUN set -eux; \
+    printf '%s\n' \
+      '[ol9_security_validation]' \
+      'name=Oracle Linux 9 FIPS Security Validation ($basearch)' \
+      'baseurl=https://yum.oracle.com/repo/OracleLinux/OL9/3/security/validation/$basearch/' \
+      'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle' \
+      'gpgcheck=1' \
+      'enabled=1' \
+      > /etc/yum.repos.d/ol9-fips-validation.repo; \
+    microdnf install -y \
+      "openssl-${OPENSSL_FIPS_VERSION}" \
+      "openssl-libs-${OPENSSL_FIPS_VERSION}" \
+      "gnutls-${GNUTLS_FIPS_VERSION}"; \
+    microdnf clean all; \
+    rm -rf /var/cache/dnf /var/cache/yum /var/cache/microdnf; \
+    rpm -q openssl openssl-libs gnutls; \
+    rpm -q openssl openssl-libs | grep -q "${OPENSSL_FIPS_VERSION}" \
+      || { echo "FATAL: openssl ${OPENSSL_FIPS_VERSION} 未成功安装"; exit 1; }; \
+    rpm -q gnutls | grep -q "${GNUTLS_FIPS_VERSION}" \
+      || { echo "FATAL: gnutls ${GNUTLS_FIPS_VERSION} 未成功安装"; exit 1; }
+
+# --- 2) MySQL Shell 内嵌 Python 的 pyOpenSSL 升级 ------------------------------
+# mysqlsh 自带独立的 python3.13（/usr/lib/mysqlsh/bin）与 pip，镜像无系统级 python3/pip。
+# - cryptography 已是 46.0.5，满足 pyOpenSSL 26.0.0 的 >=46 要求，故 --no-deps 只替换纯 Python 的
+#   pyOpenSSL，绝不触碰 native 的 cryptography。
+# - 装后校验版本并加载 OpenSSL.SSL（验证与 cryptography 的 ABI 协同），失败则 build 失败（fail-closed）。
+ARG PYOPENSSL_VERSION=26.0.0
+RUN set -eux; \
+    PY=/usr/lib/mysqlsh/bin/python3.13; \
+    "$PY" -m pip install --no-deps --upgrade "pyOpenSSL==${PYOPENSSL_VERSION}" \
+      -i https://pypi.tuna.tsinghua.edu.cn/simple --disable-pip-version-check --root-user-action=ignore; \
+    "$PY" -c "import OpenSSL, OpenSSL.SSL; assert OpenSSL.__version__ == '${PYOPENSSL_VERSION}', OpenSSL.__version__; print('pyOpenSSL', OpenSSL.__version__)"

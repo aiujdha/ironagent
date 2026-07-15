@@ -1,0 +1,115 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-service
+spec:
+  template:
+    spec:
+      serviceAccountName: ironagent-runtime-provisioner
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: init-workspace-root
+          image: localhost/ironagent-security-service
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              mkdir -p /workspace-root/assistants /workspace-root/runtime-state /workspace-root/control-plane/config /workspace-root/control-plane/data /workspace-root/host-ironagent
+              mkdir -p /workspace-root/control-plane/config/capabilities
+              for f in /config-seed/capabilities/*.yaml; do
+                target="/workspace-root/control-plane/config/capabilities/$(basename "$f")"
+                [ -e "$target" ] || cp "$f" "$target"
+              done
+              chown 1000:1000 /workspace-root /workspace-root/control-plane /workspace-root/control-plane/config /workspace-root/control-plane/data
+              chmod u+rwX,g+rwX /workspace-root /workspace-root/control-plane /workspace-root/control-plane/config /workspace-root/control-plane/data
+              chown -R 1000:1000 /workspace-root/control-plane/config/capabilities
+              chmod -R u+rwX,g+rwX /workspace-root/control-plane/config/capabilities
+              chown -R 1000:1000 /workspace-root/assistants /workspace-root/runtime-state /workspace-root/host-ironagent
+              chmod -R u+rwX,g+rwX /workspace-root/assistants /workspace-root/runtime-state /workspace-root/host-ironagent
+          volumeMounts:
+            - name: assistant-workspaces
+              mountPath: /workspace-root
+            - name: capability-profile-files
+              mountPath: /config-seed/capabilities
+              readOnly: true
+      containers:
+        - name: security-service
+          env:
+            - name: IRON_AGENT_RUNTIME_GATEWAY_PUBLISH_HOST
+              $patch: delete
+            - name: IRON_AGENT_RUNTIME_GATEWAY_PUBLISH_HOST
+              $patch: delete
+            - name: IRON_AGENT_RUNTIME_GATEWAY_ACCESS_HOST
+              $patch: delete
+            - name: IRON_AGENT_RUNTIME_GATEWAY_ACCESS_HOST
+              $patch: delete
+          volumeMounts:
+            - name: assistant-workspaces
+              mountPath: /workspace-root
+            - name: runtime-command-files
+              $patch: delete
+            - name: host-ironagent
+              $patch: delete
+            - name: docker-sock
+              $patch: delete
+            - name: nerdctl-bin
+              $patch: delete
+            - name: nsenter-bin
+              $patch: delete
+            - name: iptables-bin
+              $patch: delete
+            - name: ip6tables-bin
+              $patch: delete
+            - name: iptables-save-bin
+              $patch: delete
+            - name: iptables-restore-bin
+              $patch: delete
+            - name: ip6tables-save-bin
+              $patch: delete
+            - name: ip6tables-restore-bin
+              $patch: delete
+            - name: libxtables-so
+              $patch: delete
+            - name: libmnl-so
+              $patch: delete
+            - name: libnftnl-so
+              $patch: delete
+      volumes:
+        - name: assistant-workspaces
+          persistentVolumeClaim:
+            claimName: assistant-workspaces
+        - name: runtime-command-files
+          $patch: delete
+        - name: host-ironagent
+          $patch: delete
+        - name: docker-sock
+          $patch: delete
+        - name: nerdctl-bin
+          $patch: delete
+        - name: nsenter-bin
+          $patch: delete
+        - name: iptables-bin
+          $patch: delete
+        - name: ip6tables-bin
+          $patch: delete
+        - name: iptables-save-bin
+          $patch: delete
+        - name: iptables-restore-bin
+          $patch: delete
+        - name: ip6tables-save-bin
+          $patch: delete
+        - name: ip6tables-restore-bin
+          $patch: delete
+        - name: libxtables-so
+          $patch: delete
+        - name: libmnl-so
+          $patch: delete
+        - name: libnftnl-so
+          $patch: delete

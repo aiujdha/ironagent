@@ -1,0 +1,14 @@
+{
+  "gateway": {
+    "bind": "lan",
+    "port": 18789,
+    "auth": {
+      "mode": "token",
+      "token": "${IRON_AGENT_GATEWAY_TOKEN:?Set IRON_AGENT_GATEWAY_TOKEN before starting}"
+    },
+    "controlUi": {
+      "dangerouslyAllowHostHeaderOriginFallback": true,
+      "dangerouslyDisableDeviceAuth": false
+    }
+  }
+}

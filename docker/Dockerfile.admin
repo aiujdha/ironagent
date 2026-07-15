@@ -1,0 +1,72 @@
+# ===== builder 阶段：安装 kubectl、升级打包工具链、构建 .venv、创建运行用户 =====
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# v1.33.0 起 kubectl 内嵌 golang.org/x/net v0.38.0，修复 CVE-2025-22872；
+# 1.30/1.31/1.32 全系列仍为 0.23.0/0.26.0/0.30.0，无法在 1.30 系列内修复
+ARG KUBECTL_VERSION=v1.33.12
+ARG TARGETOS=linux
+ARG TARGETARCH=amd64
+
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
+    sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list || true && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates curl && \
+    curl --http1.1 --retry 5 --retry-all-errors --connect-timeout 15 --max-time 180 --speed-time 30 --speed-limit 1024 \
+      -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/${TARGETOS}/${TARGETARCH}/kubectl" -o /usr/local/bin/kubectl && \
+    chmod +x /usr/local/bin/kubectl && \
+    apt-get purge -y --auto-remove curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# 0. 升级系统层打包工具链以修复 CVE：pip / wheel 版本过旧；
+#    setuptools 内置 vendored 的 jaraco.context 5.3.0 存在 CVE-2026-23949（Zip Slip 路径遍历），
+#    固定升级到 pip 26.1.1 / wheel 0.47.0 / setuptools 82.0.1；同时清除 apt 旧版残留（dpkg 记录 + dist-info），
+#    避免 OS 包扫描器和 Python 包扫描器继续报旧版本。
+RUN pip install --no-cache-dir --upgrade \
+    "pip==26.1.1" "setuptools==82.0.1" "wheel==0.47.0" \
+    -i https://mirrors.cloud.tencent.com/pypi/simple \
+    --trusted-host mirrors.cloud.tencent.com && \
+    if command -v apt-get >/dev/null 2>&1; then apt-get purge -y python3-pip python3-setuptools python3-wheel || true; fi && \
+    rm -rf /usr/lib/python3/dist-packages/pip* \
+           /usr/lib/python3/dist-packages/setuptools* \
+           /usr/lib/python3/dist-packages/wheel* \
+           /usr/lib/python3/dist-packages/pkg_resources*
+
+# 1. 安装 uv
+RUN pip install uv \
+    -i https://mirrors.cloud.tencent.com/pypi/simple \
+    --trusted-host mirrors.cloud.tencent.com
+
+# 2. 【关键】先拷贝依赖定义文件
+# 只要 pyproject.toml 和 uv.lock 不动，后续的 uv sync 就会命中缓存
+COPY pyproject.toml uv.lock* README.md /app/
+
+# 3. 设置镜像源并同步依赖
+# 使用 --no-install-project 是为了在没有源码的情况下先装好库
+ENV UV_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple
+RUN uv sync --no-dev --no-install-project
+
+# 4. 【关键】最后拷贝源代码
+# 修改 src 下的代码只会触发这一层及之后的构建
+ENV PYTHONPATH=/app
+COPY src /app/src
+COPY migrations /app/migrations
+COPY scripts/migrate_workspace_files_to_mysql.py /app/scripts/migrate_workspace_files_to_mysql.py
+COPY scripts/compare_workspace_files_backends.py /app/scripts/compare_workspace_files_backends.py
+
+# 5. 【关键】修复权限：确保容器内创建的文件属于当前用户
+# 获取宿主机的用户 ID 和组 ID（在 build 时通过 --build-arg 传入）
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+RUN groupadd -g $HOST_GID appgroup && \
+    groupadd -g 999 docker && \
+    useradd -m -u $HOST_UID -g $HOST_GID -G docker appuser && \
+    chown -R appuser:appgroup /app
+
+EXPOSE 8501
+
+# 使用非 root 用户运行
+USER appuser
+
+CMD ["sh", "-lc", "set -e; if [ \"${IRON_AGENT_AUTO_MIGRATE:-1}\" = \"1\" ]; then .venv/bin/alembic -c migrations/alembic.ini upgrade head; fi; exec .venv/bin/uvicorn src.admin_web.app:app --host 0.0.0.0 --port 8501"]

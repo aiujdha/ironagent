@@ -1,0 +1,4 @@
+default_timeout_seconds: 300
+high_risk_levels:
+  - high
+  - critical

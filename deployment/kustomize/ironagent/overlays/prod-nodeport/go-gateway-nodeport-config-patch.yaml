@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: go-gateway-config
+data:
+  GO_GATEWAY_PUBLIC_BASE_URL: http://192.0.2.10:30808
+  GO_GATEWAY_SECURITY_BASE_URL: http://security-service:8000
+  GO_GATEWAY_ADMIN_BASE_URL: http://admin:8501
+  GO_GATEWAY_RUNTIME_SYNC_INTERVAL: 5s

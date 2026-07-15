@@ -1,0 +1,61 @@
+FROM ghcr.io/astral-sh/uv:latest AS uv
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG http_proxy
+ARG https_proxy
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV http_proxy=${http_proxy}
+ENV https_proxy=${https_proxy}
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fontconfig fonts-wqy-zenhei \
+    && rm -rf /var/lib/apt/lists/*
+
+# 升级基础镜像系统层的打包工具链以修复 CVE：
+# pip / wheel 版本过旧；setuptools 内置 vendored 的 jaraco.context 5.3.0
+# 存在 CVE-2026-23949（Zip Slip 路径遍历），固定升级到 pip 26.1.1 / wheel 0.47.0 / setuptools 82.0.1；
+# 同时清除 apt 旧版残留（dpkg 记录 + dist-info），避免扫描器继续报旧版本。
+RUN pip install --no-cache-dir --upgrade \
+    "pip==26.1.1" "setuptools==82.0.1" "wheel==0.47.0" \
+    -i https://mirrors.cloud.tencent.com/pypi/simple \
+    --trusted-host mirrors.cloud.tencent.com && \
+    if command -v apt-get >/dev/null 2>&1; then apt-get purge -y python3-pip python3-setuptools python3-wheel; fi && \
+    rm -rf /usr/lib/python3/dist-packages/pip* \
+           /usr/lib/python3/dist-packages/setuptools* \
+           /usr/lib/python3/dist-packages/wheel* \
+           /usr/lib/python3/dist-packages/pkg_resources*
+
+COPY pyproject.toml README.md /app/
+COPY src /app/src
+COPY config /app/config
+COPY scripts /app/scripts
+
+ENV UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN uv sync --no-dev
+RUN uv pip install --python .venv/bin/python \
+    numpy==1.26.4 \
+    olefile==0.47 \
+    openpyxl==3.1.5 \
+    python-docx==1.1.2 \
+    matplotlib==3.8.4 \
+    'pandas>=2.1.0,<3' \
+    python-pptx \
+    pymupdf \
+    pypdf \
+    pdfplumber \
+    reportlab \
+    Pillow \
+    tabulate
+RUN .venv/bin/python scripts/assistant_pydeps_smoke.py \
+    --output /tmp/ironagent-assistant-pydeps-smoke.png
+
+EXPOSE 8100
+
+CMD [".venv/bin/uvicorn", "src.assistants_service.app:app", "--host", "0.0.0.0", "--port", "8100"]

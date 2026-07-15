@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ironagent
+
+resources:
+  - ../../base
+
+images:
+  - name: localhost/ironagent
+    newName: localhost/ironagent
+    newTag: pytools-nodefix-20260604-r1-fc0e2e9a
+  - name: localhost/ironagent-admin
+    newName: localhost/ironagent-admin
+    newTag: kubectl-v13312-20260603-r1-fc0e2e9a
+  - name: localhost/ironagent-callback-receiver
+    newName: localhost/ironagent-callback-receiver
+    newTag: callback-receiver-20260604-r2-fc0e2e9a
+  - name: localhost/ironagent-security-service
+    newName: localhost/ironagent-security-service
+    newTag: kubectl-v13312-20260603-r1-fc0e2e9a
+  - name: registry.example.com/ironagent/go-gateway
+    newName: registry.example.com/ironagent/go-gateway
+    newTag: v0.0.0-replace-me
+
+patches:
+  - path: runtime-patch-go-gateway.yaml
+    target:
+      kind: Deployment
+      name: go-gateway
+  - path: runtime-patch-gateway.yaml
+    target:
+      kind: Deployment
+      name: ironagent-gateway
+  - path: runtime-patch-cli.yaml
+    target:
+      kind: Deployment
+      name: ironagent-cli
+  - path: runtime-patch-admin.yaml
+    target:
+      kind: Deployment
+      name: admin
+  - path: runtime-patch-security-service.yaml
+    target:
+      kind: Deployment
+      name: security-service

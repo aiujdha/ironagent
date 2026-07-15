@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-gateway
+spec:
+  template:
+    spec:
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: init-ironagent-home
+          image: localhost/ironagent
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              mkdir -p /workspace-root/control-plane/ironagent-home
+              chown -R 1000:1000 /workspace-root/control-plane/ironagent-home
+              chmod -R u+rwX,g+rwX /workspace-root/control-plane/ironagent-home
+          volumeMounts:
+            - name: ironagent-home
+              mountPath: /workspace-root
+      containers:
+        - name: ironagent-gateway
+          volumeMounts:
+            - name: ironagent-home
+              mountPath: /app/ironagent/.ironagent
+              subPath: control-plane/ironagent-home
+      volumes:
+        - name: ironagent-home
+          $patch: replace
+          persistentVolumeClaim:
+            claimName: assistant-workspaces

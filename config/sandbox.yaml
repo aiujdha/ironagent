@@ -1,0 +1,4 @@
+enabled: false
+cpu_limit: "1.0"
+memory_limit_mb: 512
+network_mode: isolated

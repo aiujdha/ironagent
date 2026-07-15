@@ -1,0 +1,41 @@
+stages:
+  - validate
+
+python-validate:
+  stage: validate
+  image: ghcr.io/astral-sh/uv:python3.11-bookworm
+  cache:
+    key: "uv-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - .venv/
+      - .cache/uv/
+  variables:
+    UV_CACHE_DIR: .cache/uv
+  script:
+    - uv sync --dev
+    - uv run ruff check src tests migrations scripts
+    - uv run pytest tests -q
+
+go-gateway-test:
+  stage: validate
+  image: golang:1.25
+  cache:
+    key: "go-${CI_COMMIT_REF_SLUG}"
+    paths:
+      - go-gateway/.gocache/
+      - go-gateway/.gomodcache/
+  variables:
+    GOCACHE: "$CI_PROJECT_DIR/go-gateway/.gocache"
+    GOMODCACHE: "$CI_PROJECT_DIR/go-gateway/.gomodcache"
+  script:
+    - cd go-gateway
+    - go test -count=1 ./...
+
+kustomize-render:
+  stage: validate
+  image:
+    name: bitnami/kubectl:1.30
+    entrypoint: [""]
+  script:
+    - kubectl kustomize deployment/kustomize/ironagent/overlays/prod-nodeport >/tmp/ironagent-prod-nodeport.yaml
+    - test -s /tmp/ironagent-prod-nodeport.yaml

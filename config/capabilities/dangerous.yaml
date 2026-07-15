@@ -1,0 +1,26 @@
+name: dangerous
+level: 3
+allowed_tools:
+  - read
+  - write
+  - edit
+  - sessions_send
+  - apply_patch
+  - web_search
+  - web_fetch
+  - memory_get
+  - memory_search
+  - session_status
+  - sessions_list
+  - sessions_history
+approval_tools:
+  - exec
+  - process
+  - cron
+  - sessions_spawn
+  - subagents
+  - code_execution
+description: High-risk profile for demos. Dangerous still permits broad file and
+  inspection access, but execution, process, cron, subagent, and code execution
+  tools require explicit approval; P0 hard-deny paths are never approvable.
+demo_focus: high_risk_with_approval

@@ -1,0 +1,6 @@
+name: chat
+level: 0
+allowed_tools: []
+approval_tools: []
+description: Conversation-only profile. Denies every tool call.
+demo_focus: chat_only

@@ -1,0 +1,9 @@
+{
+  "agent_id": "main",
+  "api_url": "http://localhost:19000",
+  "log_level": "info",
+  "workspace_root": "/tmp/ironagent-workspace",
+  "security": {
+    "enabled": true,
+    "policy_enforcement": "strict"
+  }

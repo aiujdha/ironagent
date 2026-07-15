@@ -1,0 +1,234 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+  selector:
+    app: redis-ha
+    statefulset.kubernetes.io/pod-name: redis-ha-0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-ha-headless
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+  selector:
+    app: redis-ha
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-sentinel
+spec:
+  ports:
+    - name: sentinel
+      port: 26379
+      targetPort: sentinel
+  selector:
+    app: redis-sentinel
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis-ha
+spec:
+  serviceName: redis-ha-headless
+  replicas: 2
+  selector:
+    matchLabels:
+      app: redis-ha
+  template:
+    metadata:
+      labels:
+        app: redis-ha
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: redis
+          image: redis:7.2.10-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /tmp/redis
+              printf 'user default on >%s ~* &* +@all\nuser %s on >%s ~* &* +@all\n' "$REDIS_PASSWORD" "$REDIS_USERNAME" "$REDIS_PASSWORD" > /tmp/redis/users.acl
+
+              pod_fqdn="${HOSTNAME}.redis-ha-headless.${POD_NAMESPACE}.svc.cluster.local"
+              bootstrap_master="redis-ha-0.redis-ha-headless.${POD_NAMESPACE}.svc.cluster.local"
+              master_host=""
+              if getent hosts redis-sentinel >/dev/null 2>&1; then
+                master_host="$(REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -h redis-sentinel -p 26379 --raw sentinel get-master-addr-by-name mymaster 2>/dev/null | sed -n '1p' || true)"
+              fi
+
+              replica_args=""
+              if [ -n "$master_host" ] && [ "$master_host" != "$pod_fqdn" ] && [ "$master_host" != "$HOSTNAME" ]; then
+                replica_args="--replicaof $master_host 6379"
+              elif [ "$HOSTNAME" != "redis-ha-0" ]; then
+                replica_args="--replicaof $bootstrap_master 6379"
+              fi
+
+              exec redis-server \
+                --appendonly yes \
+                --appendfsync everysec \
+                --dir /data \
+                --protected-mode no \
+                --aclfile /tmp/redis/users.acl \
+                --masteruser "$REDIS_USERNAME" \
+                --masterauth "$REDIS_PASSWORD" \
+                $replica_args
+          ports:
+            - name: redis
+              containerPort: 6379
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_USERNAME
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --user "$REDIS_USERNAME" ping | grep -q PONG
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --user "$REDIS_USERNAME" ping | grep -q PONG
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: ironagent-local
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-sentinel
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis-sentinel
+  template:
+    metadata:
+      labels:
+        app: redis-sentinel
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: sentinel
+          image: redis:7.2.10-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              mkdir -p /tmp/sentinel
+              cat > /tmp/sentinel/sentinel.conf <<EOF
+              port 26379
+              dir /tmp/sentinel
+              protected-mode no
+              requirepass ${REDIS_PASSWORD}
+              sentinel resolve-hostnames yes
+              sentinel announce-hostnames yes
+              sentinel monitor mymaster redis-ha-0.redis-ha-headless.${POD_NAMESPACE}.svc.cluster.local 6379 2
+              sentinel auth-user mymaster ${REDIS_USERNAME}
+              sentinel auth-pass mymaster ${REDIS_PASSWORD}
+              sentinel sentinel-user default
+              sentinel sentinel-pass ${REDIS_PASSWORD}
+              sentinel down-after-milliseconds mymaster 5000
+              sentinel failover-timeout mymaster 15000
+              sentinel parallel-syncs mymaster 1
+              EOF
+              exec redis-server /tmp/sentinel/sentinel.conf --sentinel
+          ports:
+            - name: sentinel
+              containerPort: 26379
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_USERNAME
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_PASSWORD
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 12
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -ec
+                - REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli -p 26379 ping | grep -q PONG
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

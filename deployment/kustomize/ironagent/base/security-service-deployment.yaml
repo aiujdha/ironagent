@@ -1,0 +1,203 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: security-service
+  template:
+    metadata:
+      labels:
+        app: security-service
+    spec:
+      containers:
+        - name: security-service
+          image: localhost/ironagent-security-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: control-plane-shared-config
+            - secretRef:
+                name: control-plane-shared-secret
+          env:
+            - name: IRON_AGENT_RUNTIME_GATEWAY_PUBLISH_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: IRON_AGENT_RUNTIME_GATEWAY_PUBLISH_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: IRON_AGENT_RUNTIME_GATEWAY_ACCESS_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+            - name: IRON_AGENT_RUNTIME_GATEWAY_ACCESS_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
+          volumeMounts:
+            - name: runtime-command-files
+              mountPath: /app/ironagent/ironagent-feat-hooks/bin/ironagent-docker
+              readOnly: true
+              subPath: ironagent-docker
+            - name: host-ironagent
+              mountPath: /app/ironagent
+            - name: workspace-template-files
+              mountPath: /app/ironagent/docs/reference/templates
+            - name: capability-profile-files
+              mountPath: /app/ironagent/ironagent-feat-hooks/config/capabilities
+            - name: docker-sock
+              mountPath: /run/containerd/containerd.sock
+            - name: nerdctl-bin
+              mountPath: /usr/local/bin/nerdctl
+              readOnly: true
+            - name: nsenter-bin
+              mountPath: /usr/bin/nsenter
+              readOnly: true
+            - name: iptables-bin
+              mountPath: /usr/local/bin/iptables
+              readOnly: true
+            - name: ip6tables-bin
+              mountPath: /usr/local/bin/ip6tables
+              readOnly: true
+            - name: iptables-save-bin
+              mountPath: /usr/local/bin/iptables-save
+              readOnly: true
+            - name: iptables-restore-bin
+              mountPath: /usr/local/bin/iptables-restore
+              readOnly: true
+            - name: ip6tables-save-bin
+              mountPath: /usr/local/bin/ip6tables-save
+              readOnly: true
+            - name: ip6tables-restore-bin
+              mountPath: /usr/local/bin/ip6tables-restore
+              readOnly: true
+            - name: libxtables-so
+              mountPath: /lib/x86_64-linux-gnu/libxtables.so.12
+              readOnly: true
+            - name: libmnl-so
+              mountPath: /lib/x86_64-linux-gnu/libmnl.so.0
+              readOnly: true
+            - name: libnftnl-so
+              mountPath: /lib/x86_64-linux-gnu/libnftnl.so.11
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: runtime-command-files
+          configMap:
+            name: runtime-command-files
+            defaultMode: 493
+            items:
+              - key: ironagent-docker
+                path: ironagent-docker
+        - name: host-ironagent
+          hostPath:
+            path: /app/ironagent
+            type: DirectoryOrCreate
+        - name: workspace-template-files
+          configMap:
+            name: workspace-template-files
+            items:
+              - key: AGENTS.md
+                path: AGENTS.md
+              - key: BOOTSTRAP.md
+                path: BOOTSTRAP.md
+              - key: HEARTBEAT.md
+                path: HEARTBEAT.md
+              - key: IDENTITY.md
+                path: IDENTITY.md
+              - key: SOUL.md
+                path: SOUL.md
+              - key: TOOLS.md
+                path: TOOLS.md
+              - key: USER.md
+                path: USER.md
+        - name: capability-profile-files
+          configMap:
+            name: capability-profile-files
+            items:
+              - key: chat.yaml
+                path: chat.yaml
+              - key: dangerous.yaml
+                path: dangerous.yaml
+              - key: onlyread.yaml
+                path: onlyread.yaml
+              - key: onlywrite.yaml
+                path: onlywrite.yaml
+              - key: work_no_exec.yaml
+                path: work_no_exec.yaml
+        - name: docker-sock
+          hostPath:
+            path: /run/containerd/containerd.sock
+            type: Socket
+        - name: nerdctl-bin
+          hostPath:
+            path: /usr/local/bin/nerdctl
+            type: File
+        - name: nsenter-bin
+          hostPath:
+            path: /usr/bin/nsenter
+            type: File
+        - name: iptables-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: ip6tables-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: iptables-save-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: iptables-restore-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: ip6tables-save-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: ip6tables-restore-bin
+          hostPath:
+            path: /usr/sbin/xtables-nft-multi
+            type: File
+        - name: libxtables-so
+          hostPath:
+            path: /lib/x86_64-linux-gnu/libxtables.so.12
+            type: File
+        - name: libmnl-so
+          hostPath:
+            path: /lib/x86_64-linux-gnu/libmnl.so.0
+            type: File
+        - name: libnftnl-so
+          hostPath:
+            path: /lib/x86_64-linux-gnu/libnftnl.so.11
+            type: File

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: control-plane-shared-config
+data:
+  IRON_AGENT_RUNTIME_BACKEND: kubernetes
+  IRON_AGENT_ASSISTANTS_WORKSPACE_ROOT: /workspace-root/assistants
+  IRON_AGENT_ASSISTANTS_RUNTIME_ROOT: /workspace-root/runtime-state
+  IRON_AGENT_HOST_IRON_AGENT_ROOT: /workspace-root/host-ironagent
+  IRON_AGENT_K8S_RUNTIME_NAMESPACE: ironagent
+  IRON_AGENT_K8S_RUNTIME_WORKSPACE_PVC: assistant-workspaces
+  IRON_AGENT_K8S_RUNTIME_WORKSPACE_SUBPATH_PREFIX: assistants
+  IRON_AGENT_K8S_RUNTIME_STATE_DIR: .ironagent
+  IRON_AGENT_K8S_RUNTIME_INIT_IMAGE: localhost/ironagent:rename-clean-20260530-r1
+  IRON_AGENT_K8S_RUNTIME_KUBECTL_BINARY: kubectl
+  IRON_AGENT_K8S_RUNTIME_DELETE_WORKSPACE_ON_DESTROY: "true"

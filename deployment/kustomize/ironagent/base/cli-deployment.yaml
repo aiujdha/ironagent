@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-cli
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ironagent-cli
+  template:
+    metadata:
+      labels:
+        app: ironagent-cli
+    spec:
+      containers:
+        - name: ironagent-cli
+          image: localhost/ironagent:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: ironagent-cli-config
+            - secretRef:
+                name: ironagent-gateway-secret
+          command:
+            - sh
+            - -lc
+            - sleep infinity
+          volumeMounts:
+            - name: ironagent-home
+              mountPath: /home/node/.ironagent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - NET_RAW
+                - NET_ADMIN
+          resources:
+            requests:
+              cpu: 25m
+              memory: 128Mi
+          stdin: true
+          tty: true
+      volumes:
+        - name: ironagent-home
+          hostPath:
+            path: /app/ironagent/.ironagent
+            type: DirectoryOrCreate

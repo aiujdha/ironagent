@@ -1,0 +1,4 @@
+/output/ export-ignore
+/docs/archive/ export-ignore
+/ironagent-main.bundle export-ignore
+*.xlsx export-ignore

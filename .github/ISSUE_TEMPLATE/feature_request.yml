@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a scoped change to IronAgent
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or operator problem, not only the desired implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: State observable behavior and acceptance evidence.
+    validations:
+      required: true
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: Primary component
+      options:
+        - Go Gateway
+        - Python control plane
+        - Admin web console
+        - Runtime integration seam
+        - Deployment / K8s
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and alternatives
+      description: Note security, compatibility, migration, or operational constraints and alternatives considered.

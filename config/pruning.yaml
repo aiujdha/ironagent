@@ -1,0 +1,4 @@
+tools:
+  - system_reset
+  - unrestricted_shell
+  - raw_network_admin

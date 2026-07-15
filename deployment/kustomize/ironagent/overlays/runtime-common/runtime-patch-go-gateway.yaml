@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-gateway
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: vm-12-16-ubuntu
+      hostAliases:
+        - ip: 192.0.2.10
+          hostnames:
+            - db.example.internal

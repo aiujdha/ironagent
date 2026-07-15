@@ -1,0 +1,17 @@
+name: onlywrite
+level: 2
+allowed_tools:
+  - read
+  - write
+  - edit
+  - apply_patch
+  - web_search
+  - web_fetch
+  - memory_get
+  - memory_search
+  - session_status
+  - sessions_list
+  - sessions_history
+approval_tools: []
+description: Controlled editing profile for demos that can inspect and modify files without shell access.
+demo_focus: file_editing

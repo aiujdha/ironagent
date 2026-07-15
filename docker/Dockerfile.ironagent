@@ -1,0 +1,70 @@
+ARG IRON_AGENT_RUNTIME_BASE_IMAGE=ironagent-runtime:dev
+FROM ${IRON_AGENT_RUNTIME_BASE_IMAGE}
+
+WORKDIR /app
+
+USER root
+
+RUN mkdir -p /home/node/.ironagent/qqbot/data \
+	&& chown -R node:node /home/node/.ironagent
+
+ARG NPM_VERSION=11.16.0
+ARG NPM_MINIMATCH_VERSION=10.2.5
+ARG NPM_PICOMATCH_VERSION=4.0.4
+ARG NPM_TAR_VERSION=7.5.16
+
+# npm 自带依赖会被安全扫描器按 /usr/local/lib/node_modules/npm/node_modules/* 扫出；
+# 先升级 npm，再直接替换 npm 内置依赖目录，避免旧 minimatch/picomatch/tar package.json 残留。
+RUN if command -v npm >/dev/null 2>&1; then \
+		npm install -g "npm@${NPM_VERSION}" --omit=dev --no-audit --no-fund; \
+		tmpdir="$(mktemp -d)"; \
+		replace_npm_pkg() { \
+			name="$1"; version="$2"; dest="$3"; \
+			pkg_file="$(npm pack "${name}@${version}" --pack-destination "$tmpdir" | tail -n 1)"; \
+			rm -rf "$dest"; \
+			mkdir -p "$dest"; \
+			tar -xzf "$tmpdir/$pkg_file" -C "$dest" --strip-components=1; \
+		}; \
+		replace_npm_pkg minimatch "$NPM_MINIMATCH_VERSION" /usr/local/lib/node_modules/npm/node_modules/minimatch; \
+		replace_npm_pkg picomatch "$NPM_PICOMATCH_VERSION" /usr/local/lib/node_modules/npm/node_modules/tinyglobby/node_modules/picomatch; \
+		replace_npm_pkg tar "$NPM_TAR_VERSION" /usr/local/lib/node_modules/npm/node_modules/tar; \
+		rm -rf "$tmpdir" /root/.npm/_cacache /root/.npm/_logs; \
+	fi
+
+# 升级系统层打包工具链以修复 CVE：pip / wheel 版本过旧；
+# setuptools 内置 vendored 的 jaraco.context 5.3.0 存在 CVE-2026-23949（Zip Slip 路径遍历），
+# 固定升级到 pip 26.1.1 / wheel 0.47.0 / setuptools 82.0.1；同时清除 apt 旧版残留（dpkg 记录 + dist-info），
+# 避免 OS 包扫描器和 Python 包扫描器继续报旧版本。
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+	--index-url https://mirrors.cloud.tencent.com/pypi/simple \
+	--trusted-host mirrors.cloud.tencent.com \
+	--upgrade "pip==26.1.1" "setuptools==82.0.1" "wheel==0.47.0" \
+	&& if command -v apt-get >/dev/null 2>&1; then apt-get purge -y python3-pip python3-setuptools python3-wheel || true; fi \
+	&& rm -rf /usr/lib/python3/dist-packages/pip* \
+	          /usr/lib/python3/dist-packages/setuptools* \
+	          /usr/lib/python3/dist-packages/wheel* \
+	          /usr/lib/python3/dist-packages/pkg_resources*
+
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
+	--index-url https://mirrors.aliyun.com/pypi/simple \
+	beautifulsoup4 \
+	olefile \
+	pdfplumber \
+	playwright \
+	pymupdf \
+	python-pptx \
+	reportlab \
+	tabulate
+
+# Create missing template directories
+RUN mkdir -p /app/docs/reference/templates
+
+COPY --chown=node:node ironagent.json /home/node/.ironagent/ironagent.json
+
+RUN chown node:node /home/node/.ironagent/ironagent.json
+
+USER node
+
+
+
+# Keep upstream entrypoint/CMD from the official IronAgent image.

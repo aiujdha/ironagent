@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: security-service
+spec:
+  template:
+    spec:
+      hostPID: true
+      nodeSelector:
+        kubernetes.io/hostname: ironagent-worker
+      hostAliases:
+        - ip: 192.0.2.10
+          hostnames:
+            - db.example.internal
+        - ip: 192.0.2.11
+          hostnames:
+            - object-storage.example.internal
+      containers:
+        - name: security-service
+          securityContext:
+            allowPrivilegeEscalation: true
+            privileged: true

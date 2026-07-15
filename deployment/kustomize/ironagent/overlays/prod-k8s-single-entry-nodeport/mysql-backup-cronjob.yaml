@@ -1,0 +1,78 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: mysql-backup
+  labels:
+    app: mysql-backup
+spec:
+  # 本地时区(k8s 1.27+ stable). UTC 默认会让 "0 2" 跑在中国 10am 撞业务高峰.
+  timeZone: "Asia/Shanghai"
+  schedule: "0 2 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: mysql-backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            fsGroup: 1000
+            runAsUser: 1000
+          containers:
+            - name: mysqldump
+              image: mysql:8.4
+              imagePullPolicy: IfNotPresent
+              env:
+                - name: MYSQL_ROOT_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: control-plane-shared-secret
+                      key: MYSQL_ROOT_PASSWORD
+                - name: MYSQL_DATABASE
+                  valueFrom:
+                    secretKeyRef:
+                      name: control-plane-shared-secret
+                      key: MYSQL_DATABASE
+                - name: RETENTION_DAYS
+                  value: "7"
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -euo pipefail
+                  BACKUP_DIR=/workspace-root/control-plane/backups
+                  mkdir -p "$BACKUP_DIR"
+                  TS=$(date +%Y%m%d-%H%M%S)
+                  TMP="$BACKUP_DIR/.mysql-${MYSQL_DATABASE}-${TS}.sql.gz.partial"
+                  OUT="$BACKUP_DIR/mysql-${MYSQL_DATABASE}-${TS}.sql.gz"
+                  echo "dumping ${MYSQL_DATABASE} -> ${OUT}"
+                  # pipefail 使 mysqldump 失败(auth/连接/中途)整条管道非0退出, set -e 中止, 不留坏备份
+                  mysqldump -h mysql -uroot -p"$MYSQL_ROOT_PASSWORD" \
+                    --single-transaction --routines --triggers --events \
+                    --databases "$MYSQL_DATABASE" | gzip > "$TMP"
+                  # 完整性校验: gzip 可解压 + 最小体积, 通过才 rename 为正式备份
+                  gunzip -t "$TMP"
+                  SIZE=$(stat -c%s "$TMP")
+                  if [ "$SIZE" -lt 1024 ]; then echo "backup too small ($SIZE B), abort"; rm -f "$TMP"; exit 1; fi
+                  mv "$TMP" "$OUT"
+                  echo "backup ok: $SIZE bytes"
+                  # 仅在成功产出新备份后才清理旧的, 避免坏备份场景下误删
+                  find "$BACKUP_DIR" -name 'mysql-*.sql.gz' -mtime +"${RETENTION_DAYS}" -delete
+                  echo "pruned backups older than ${RETENTION_DAYS}d"
+              volumeMounts:
+                - name: backup-store
+                  mountPath: /workspace-root
+          volumes:
+            - name: backup-store
+              persistentVolumeClaim:
+                claimName: assistant-workspaces
+# ⚠️ 备份落点有效性依赖 assistant-workspaces PVC 的真实后端:
+#   - 若为网络存储(华为SFS/NFS, 用户称生产实际如此) -> 备份离开 MySQL 单机盘, 有效.
+#   - 若为 local PV(本 overlay 的 workspace-local-pv.yaml 钉死 vm-12-16-ubuntu, 与 MySQL 同节点)
+#     -> 备份与主库同盘同 blast radius, 节点/磁盘损坏两者皆失, 此时必须改为独立备份PVC或OBS外推.
+#   生产取证: 确认该PVC后端后再定备份落点(待人工确认门).

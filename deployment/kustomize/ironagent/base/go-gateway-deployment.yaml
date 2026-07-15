@@ -1,0 +1,105 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-gateway
+  template:
+    metadata:
+      labels:
+        app: go-gateway
+    spec:
+      containers:
+        - name: go-gateway
+          image: registry.example.com/ironagent/go-gateway:v0.0.0-replace-me
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              for name in GO_GATEWAY_INTERNAL_SERVICE_TOKEN GO_GATEWAY_DATABASE_URL GO_GATEWAY_SCOPED_API_KEYS GO_GATEWAY_HMAC_SECRET GO_GATEWAY_CALLBACK_SECRET GO_GATEWAY_PRESIGN_SECRET GO_GATEWAY_PROXY_SESSION_SECRET; do
+                eval "value=\${$name:-}"
+                case "$value" in
+                  ""|CHANG[E]_ME*|*REPLAC[E]_ME*|*user:password@mysql*)
+                    echo "invalid placeholder secret: $name" >&2
+                    exit 1
+                    ;;
+                esac
+              done
+              case "${GO_GATEWAY_API_KEYS:-};${GO_GATEWAY_SCOPED_API_KEYS:-}" in
+                *public-key*|*runtime-key*|*debug-key*|*admin-key*|*proxy-key*|*change-me*)
+                  echo "invalid weak default gateway key" >&2
+                  exit 1
+                  ;;
+              esac
+              exec /usr/local/bin/go-gateway
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: go-gateway-config
+            - secretRef:
+                name: go-gateway-secret
+          env:
+            - name: GO_GATEWAY_INTERNAL_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: IRON_AGENT_INTERNAL_SERVICE_TOKEN
+            - name: GO_GATEWAY_REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_USERNAME
+                  optional: true
+            - name: GO_GATEWAY_REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: control-plane-shared-secret
+                  key: REDIS_PASSWORD
+                  optional: true
+          volumeMounts:
+            - name: go-gateway-file-config
+              mountPath: /etc/ironagent/go-gateway.json
+              subPath: go-gateway.json
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: go-gateway-file-config
+          configMap:
+            name: go-gateway-file-config

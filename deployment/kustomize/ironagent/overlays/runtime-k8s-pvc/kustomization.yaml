@@ -1,0 +1,61 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ironagent
+
+resources:
+  - ../../base
+  - runtime-rbac.yaml
+  - workspace-pvc.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: runtime-command-files
+    behavior: replace
+    literals:
+      - ironagent-docker=echo "containerd runtime command wrapper is disabled when IRON_AGENT_RUNTIME_BACKEND=kubernetes" >&2; exit 127
+
+images:
+  - name: localhost/ironagent
+    newName: localhost/ironagent
+    newTag: pytools-nodefix-20260604-r1-fc0e2e9a
+  - name: localhost/ironagent-admin
+    newName: localhost/ironagent-admin
+    newTag: kubectl-v13312-20260603-r1-fc0e2e9a
+  - name: localhost/ironagent-callback-receiver
+    newName: localhost/ironagent-callback-receiver
+    newTag: callback-receiver-20260604-r2-fc0e2e9a
+  - name: localhost/ironagent-security-service
+    newName: localhost/ironagent-security-service
+    newTag: kubectl-v13312-20260603-r1-fc0e2e9a
+  - name: registry.example.com/ironagent/go-gateway
+    newName: localhost/go-gateway
+    newTag: callback-hardening-20260609-r1-fc0e2e9a
+
+patches:
+  - path: runtime-k8s-pvc-patch-gateway.yaml
+    target:
+      kind: Deployment
+      name: ironagent-gateway
+  - path: runtime-k8s-pvc-patch-cli.yaml
+    target:
+      kind: Deployment
+      name: ironagent-cli
+  - path: runtime-k8s-pvc-patch-admin.yaml
+    target:
+      kind: Deployment
+      name: admin
+  - path: runtime-k8s-pvc-patch-security-service.yaml
+    target:
+      kind: Deployment
+      name: security-service
+  - path: runtime-k8s-pvc-jsonpatch-gateway-volume.yaml
+    target:
+      kind: Deployment
+      name: ironagent-gateway
+  - path: runtime-k8s-pvc-jsonpatch-cli-volume.yaml
+    target:
+      kind: Deployment
+      name: ironagent-cli

@@ -1,0 +1,14 @@
+name: onlyread
+level: 1
+allowed_tools:
+  - read
+  - web_search
+  - web_fetch
+  - memory_get
+  - memory_search
+  - session_status
+  - sessions_list
+  - sessions_history
+approval_tools: []
+description: Read-only profile for demos that can inspect files, web content, and session context.
+demo_focus: read_only

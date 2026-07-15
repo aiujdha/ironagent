@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "default": {
+      "type": "api_key",
+      "api_key": "REPLACE_ME",
+      "description": "Local development profile"
+    }
+  },
+  "default_profile": "default"
+}
