@@ -1,0 +1,125 @@
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ironagent-gateway-config
+  namespace: ironagent
+
+data:
+  HOME: "/home/node"
+  TERM: "xterm-256color"
+  TZ: "UTC"
+  IRONAGENT_CONFIG_DIR: "/app/ironagent/.ironagent"
+  IRONAGENT_GATEWAY_BIND: "lan"
+  IRONAGENT_GATEWAY_PORT: "18789"
+  IRONAGENT_GATEWAY_ALLOWED_ORIGINS: '["http://192.0.2.10:30789","http://127.0.0.1:30789","http://localhost:30789"]'
+
+---
+# Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ironagent-gateway-secret
+  namespace: ironagent
+type: Opaque
+stringData:
+  IRONAGENT_GATEWAY_TOKEN: "REPLACE_WITH_STRONG_RANDOM_TOKEN"
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-gateway
+  namespace: ironagent
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ironagent-gateway
+  template:
+    metadata:
+      labels:
+        app: ironagent-gateway
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ironagent-worker
+      containers:
+        - name: ironagent-gateway
+          image: localhost/ironagent:main-20260417
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 18789
+            - containerPort: 18790
+          envFrom:
+            - configMapRef:
+                name: ironagent-gateway-config
+            - secretRef:
+                name: ironagent-gateway-secret
+          command:
+            - sh
+            - -lc
+            - |
+              set -e
+              entry=/app/dist/index.mjs
+              [ -f "$entry" ] || entry=/app/dist/index.js
+              node "$entry" config set gateway.mode local >/dev/null
+              node "$entry" config set gateway.bind "$IRONAGENT_GATEWAY_BIND" >/dev/null
+              node "$entry" config set gateway.auth.mode token >/dev/null
+              node "$entry" config set gateway.controlUi.allowedOrigins "$IRONAGENT_GATEWAY_ALLOWED_ORIGINS" --strict-json >/dev/null
+              node "$entry" config unset gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback >/dev/null || true
+              node "$entry" config unset gateway.controlUi.dangerouslyDisableDeviceAuth >/dev/null || true
+              exec node "$entry" gateway run --allow-unconfigured --bind "$IRONAGENT_GATEWAY_BIND" --port "$IRONAGENT_GATEWAY_PORT"
+          volumeMounts:
+            - name: ironagent-home
+              mountPath: /app/ironagent/.ironagent
+          securityContext:
+            allowPrivilegeEscalation: false
+          livenessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "require('http').get('http://127.0.0.1:18789/healthz', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            exec:
+              command:
+                - node
+                - -e
+                - "require('http').get('http://127.0.0.1:18789/readyz', r => process.exit(r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: ironagent-home
+          hostPath:
+            path: /app/ironagent/.ironagent
+            type: DirectoryOrCreate
+
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ironagent-gateway
+  namespace: ironagent
+
+spec:
+  type: NodePort
+  selector:
+    app: ironagent-gateway
+  ports:
+    - name: gateway
+      port: 18789
+      targetPort: 18789
+      nodePort: 30789
+    - name: bridge
+      port: 18790
+      targetPort: 18790
+      nodePort: 30790

@@ -1,0 +1,1 @@
+First App Store release of IronAgent for iPhone. Pair with your IronAgent Gateway to use chat, voice, sharing, and device actions from iOS.

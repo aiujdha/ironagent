@@ -1,0 +1,23 @@
+{
+  "name": "@ironagent/memory-core",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent core memory search plugin",
+  "type": "module",
+  "devDependencies": {
+    "ironagent": "workspace:*"
+  },
+  "peerDependencies": {
+    "ironagent": ">=2026.4.1-beta.1"
+  },
+  "peerDependenciesMeta": {
+    "ironagent": {
+      "optional": true
+    }
+  },
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,32 @@
+# IronAgent gateway — Podman Quadlet (rootless)
+# Installed by scripts/podman/setup.sh into the current user's ~/.config/containers/systemd/
+# {{IRONAGENT_HOME}}, {{IRONAGENT_CONFIG_DIR}}, {{IRONAGENT_WORKSPACE_DIR}},
+# {{IMAGE_NAME}}, and {{CONTAINER_NAME}} are replaced at install time.
+
+[Unit]
+Description=IronAgent gateway (rootless Podman)
+
+[Container]
+Image={{IMAGE_NAME}}
+ContainerName={{CONTAINER_NAME}}
+UserNS=keep-id
+# Keep container UID/GID aligned with the invoking user so mounted config is readable.
+User=%U:%G
+Volume={{IRONAGENT_CONFIG_DIR}}:/home/node/.ironagent:Z
+Volume={{IRONAGENT_WORKSPACE_DIR}}:/home/node/.ironagent/workspace:Z
+EnvironmentFile={{IRONAGENT_CONFIG_DIR}}/.env
+Environment=HOME=/home/node
+Environment=TERM=xterm-256color
+Environment=NPM_CONFIG_CACHE=/home/node/.ironagent/.npm
+Environment=IRONAGENT_NO_RESPAWN=1
+PublishPort=127.0.0.1:18789:18789
+PublishPort=127.0.0.1:18790:18790
+Pull=never
+Exec=node dist/index.js gateway --bind lan --port 18789
+
+[Service]
+TimeoutStartSec=300
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,83 @@
+services:
+  ironagent-gateway:
+    image: ${IRONAGENT_IMAGE:-ironagent:local}
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      IRONAGENT_GATEWAY_TOKEN: ${IRONAGENT_GATEWAY_TOKEN:-}
+      IRONAGENT_ALLOW_INSECURE_PRIVATE_WS: ${IRONAGENT_ALLOW_INSECURE_PRIVATE_WS:-}
+      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
+      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
+      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      TZ: ${IRONAGENT_TZ:-UTC}
+    volumes:
+      - ${IRONAGENT_CONFIG_DIR}:/home/node/.ironagent
+      - ${IRONAGENT_WORKSPACE_DIR}:/home/node/.ironagent/workspace
+      # In local development, uncomment the next line to prefer the freshly
+      # built repo output over the image-baked dist (requires host `pnpm build`
+      # AND `pnpm ui:build` so control-ui assets are present).
+      # - ./dist:/app/dist
+      ## Uncomment the lines below to enable sandbox isolation
+      ## (agents.defaults.sandbox). Requires Docker CLI in the image
+      ## (build with --build-arg IRONAGENT_INSTALL_DOCKER_CLI=1) or use
+      ## scripts/docker/setup.sh with IRONAGENT_SANDBOX=1 for automated setup.
+      ## Set DOCKER_GID to the host's docker group GID (run: stat -c '%g' /var/run/docker.sock).
+      # - /var/run/docker.sock:/var/run/docker.sock
+      # group_add:
+      #   - "${DOCKER_GID:-999}"
+    ports:
+      - "${IRONAGENT_GATEWAY_PORT:-18789}:18789"
+      - "${IRONAGENT_BRIDGE_PORT:-18790}:18790"
+    init: true
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -c
+      - |
+        # Keep the default agent workspace on the container-mounted path.
+        # The host config may still contain a macOS absolute path like /Users/...,
+        # which breaks heartbeat runs inside the Linux container.
+        node dist/index.js config set agents.defaults.workspace /home/node/.ironagent/workspace &&
+        node dist/index.js config set gateway.mode local &&
+        node dist/index.js config set gateway.bind lan &&
+        node dist/index.js config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true &&
+        node dist/index.js config set gateway.controlUi.dangerouslyDisableDeviceAuth true &&
+        node dist/index.js gateway --bind ${IRONAGENT_GATEWAY_BIND:-lan} --port 18789
+    healthcheck:
+      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:18789/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ironagent-cli:
+    image: ${IRONAGENT_IMAGE:-ironagent:local}
+    network_mode: "service:ironagent-gateway"
+    cap_drop:
+      - NET_RAW
+      - NET_ADMIN
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      HOME: /home/node
+      TERM: xterm-256color
+      IRONAGENT_GATEWAY_TOKEN: ${IRONAGENT_GATEWAY_TOKEN:-}
+      IRONAGENT_ALLOW_INSECURE_PRIVATE_WS: ${IRONAGENT_ALLOW_INSECURE_PRIVATE_WS:-}
+      BROWSER: echo
+      CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
+      CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
+      CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      TZ: ${IRONAGENT_TZ:-UTC}
+    volumes:
+      - ${IRONAGENT_CONFIG_DIR}:/home/node/.ironagent
+      - ${IRONAGENT_WORKSPACE_DIR}:/home/node/.ironagent/workspace
+    stdin_open: true
+    tty: true
+    init: true
+    entrypoint: [ "node", "dist/index.js" ]
+    depends_on:
+      - ironagent-gateway

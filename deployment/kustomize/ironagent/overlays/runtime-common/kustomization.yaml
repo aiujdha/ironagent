@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ironagent
+
+resources:
+  - ../../base
+
+images:
+  - name: localhost/ironagent
+    newName: localhost/ironagent
+    newTag: 808e4ac-hotfix1
+  - name: localhost/ironagent-admin
+    newName: localhost/ironagent-admin
+    newTag: 808e4ac-hotfix13
+  - name: localhost/ironagent-security-service
+    newName: localhost/ironagent-security-service
+    newTag: 808e4ac-hotfix6
+
+patches:
+  - path: runtime-patch-gateway.yaml
+    target:
+      kind: Deployment
+      name: ironagent-gateway
+  - path: runtime-patch-cli.yaml
+    target:
+      kind: Deployment
+      name: ironagent-cli
+  - path: runtime-patch-admin.yaml
+    target:
+      kind: Deployment
+      name: admin
+  - path: runtime-patch-security-service.yaml
+    target:
+      kind: Deployment
+      name: security-service

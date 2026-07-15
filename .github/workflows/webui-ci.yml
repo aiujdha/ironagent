@@ -1,0 +1,64 @@
+name: WebUI CI
+
+on:
+  push:
+    branches: [feat/webui]
+  pull_request:
+    branches: [feat/webui]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webui-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check
+        run: pnpm tsgo
+      - name: Lint WebUI and workspace integration
+        run: >-
+          pnpm exec oxlint --deny-warnings
+          ui/src/ui/controllers/control-ui-launch.ts
+          ui/src/ui/controllers/workspace-files.ts
+          src/gateway/server.workspace-files.test.ts
+          src/gateway/workspace-files-http.ts
+          src/gateway/workspace-files-push-sync.ts
+      - run: pnpm ui:build
+      - name: Test WebUI and workspace integration
+        run: >-
+          pnpm exec vitest run
+          ui/src/ui/controllers/control-ui-launch.test.ts
+          ui/src/ui/controllers/workspace-files.test.ts
+          src/gateway/server.workspace-files.test.ts
+          src/gateway/workspace-files-push-sync.test.ts
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,16 @@
+{
+  "name": "@ironagent/llm-task",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent JSON-only LLM task plugin",
+  "type": "module",
+  "dependencies": {
+    "@sinclair/typebox": "0.34.49",
+    "ajv": "^8.18.0"
+  },
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

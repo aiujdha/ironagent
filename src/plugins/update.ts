@@ -1,0 +1,705 @@
+import type { IronAgentConfig } from "../config/config.js";
+import {
+  expectedIntegrityForUpdate,
+  readInstalledPackageVersion,
+} from "../infra/package-update-utils.js";
+import type { UpdateChannel } from "../infra/update-channels.js";
+import { resolveUserPath } from "../utils.js";
+import { resolveBundledPluginSources } from "./bundled-sources.js";
+import { installPluginFromIronHub } from "./ironhub.js";
+import {
+  installPluginFromNpmSpec,
+  PLUGIN_INSTALL_ERROR_CODE,
+  resolvePluginInstallDir,
+} from "./install.js";
+import { buildNpmResolutionInstallFields, recordPluginInstall } from "./installs.js";
+import { installPluginFromMarketplace } from "./marketplace.js";
+
+export type PluginUpdateLogger = {
+  info?: (message: string) => void;
+  warn?: (message: string) => void;
+  error?: (message: string) => void;
+};
+
+export type PluginUpdateStatus = "updated" | "unchanged" | "skipped" | "error";
+
+export type PluginUpdateOutcome = {
+  pluginId: string;
+  status: PluginUpdateStatus;
+  message: string;
+  currentVersion?: string;
+  nextVersion?: string;
+};
+
+export type PluginUpdateSummary = {
+  config: IronAgentConfig;
+  changed: boolean;
+  outcomes: PluginUpdateOutcome[];
+};
+
+export type PluginUpdateIntegrityDriftParams = {
+  pluginId: string;
+  spec: string;
+  expectedIntegrity: string;
+  actualIntegrity: string;
+  resolvedSpec?: string;
+  resolvedVersion?: string;
+  dryRun: boolean;
+};
+
+export type PluginChannelSyncSummary = {
+  switchedToBundled: string[];
+  switchedToNpm: string[];
+  warnings: string[];
+  errors: string[];
+};
+
+export type PluginChannelSyncResult = {
+  config: IronAgentConfig;
+  changed: boolean;
+  summary: PluginChannelSyncSummary;
+};
+
+function formatNpmInstallFailure(params: {
+  pluginId: string;
+  spec: string;
+  phase: "check" | "update";
+  result: { error: string; code?: string };
+}): string {
+  if (params.result.code === PLUGIN_INSTALL_ERROR_CODE.NPM_PACKAGE_NOT_FOUND) {
+    return `Failed to ${params.phase} ${params.pluginId}: npm package not found for ${params.spec}.`;
+  }
+  return `Failed to ${params.phase} ${params.pluginId}: ${params.result.error}`;
+}
+
+function formatMarketplaceInstallFailure(params: {
+  pluginId: string;
+  marketplaceSource: string;
+  marketplacePlugin: string;
+  phase: "check" | "update";
+  error: string;
+}): string {
+  return (
+    `Failed to ${params.phase} ${params.pluginId}: ` +
+    `${params.error} (marketplace plugin ${params.marketplacePlugin} from ${params.marketplaceSource}).`
+  );
+}
+
+function formatIronHubInstallFailure(params: {
+  pluginId: string;
+  spec: string;
+  phase: "check" | "update";
+  error: string;
+}): string {
+  return `Failed to ${params.phase} ${params.pluginId}: ${params.error} (IronHub ${params.spec}).`;
+}
+
+type InstallIntegrityDrift = {
+  spec: string;
+  expectedIntegrity: string;
+  actualIntegrity: string;
+  resolution: {
+    resolvedSpec?: string;
+    version?: string;
+  };
+};
+
+function pathsEqual(
+  left: string | undefined,
+  right: string | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!left || !right) {
+    return false;
+  }
+  return resolveUserPath(left, env) === resolveUserPath(right, env);
+}
+
+function buildLoadPathHelpers(existing: string[], env: NodeJS.ProcessEnv = process.env) {
+  let paths = [...existing];
+  const resolveSet = () => new Set(paths.map((entry) => resolveUserPath(entry, env)));
+  let resolved = resolveSet();
+  let changed = false;
+
+  const addPath = (value: string) => {
+    const normalized = resolveUserPath(value, env);
+    if (resolved.has(normalized)) {
+      return;
+    }
+    paths.push(value);
+    resolved.add(normalized);
+    changed = true;
+  };
+
+  const removePath = (value: string) => {
+    const normalized = resolveUserPath(value, env);
+    if (!resolved.has(normalized)) {
+      return;
+    }
+    paths = paths.filter((entry) => resolveUserPath(entry, env) !== normalized);
+    resolved = resolveSet();
+    changed = true;
+  };
+
+  return {
+    addPath,
+    removePath,
+    get changed() {
+      return changed;
+    },
+    get paths() {
+      return paths;
+    },
+  };
+}
+
+function replacePluginIdInList(
+  entries: string[] | undefined,
+  fromId: string,
+  toId: string,
+): string[] | undefined {
+  if (!entries || entries.length === 0 || fromId === toId) {
+    return entries;
+  }
+  const next: string[] = [];
+  for (const entry of entries) {
+    const value = entry === fromId ? toId : entry;
+    if (!next.includes(value)) {
+      next.push(value);
+    }
+  }
+  return next;
+}
+
+function migratePluginConfigId(cfg: IronAgentConfig, fromId: string, toId: string): IronAgentConfig {
+  if (fromId === toId) {
+    return cfg;
+  }
+
+  const installs = cfg.plugins?.installs;
+  const entries = cfg.plugins?.entries;
+  const slots = cfg.plugins?.slots;
+  const allow = replacePluginIdInList(cfg.plugins?.allow, fromId, toId);
+  const deny = replacePluginIdInList(cfg.plugins?.deny, fromId, toId);
+
+  const nextInstalls = installs ? { ...installs } : undefined;
+  if (nextInstalls && fromId in nextInstalls) {
+    const record = nextInstalls[fromId];
+    if (record && !(toId in nextInstalls)) {
+      nextInstalls[toId] = record;
+    }
+    delete nextInstalls[fromId];
+  }
+
+  const nextEntries = entries ? { ...entries } : undefined;
+  if (nextEntries && fromId in nextEntries) {
+    const entry = nextEntries[fromId];
+    if (entry) {
+      nextEntries[toId] = nextEntries[toId]
+        ? {
+            ...entry,
+            ...nextEntries[toId],
+          }
+        : entry;
+    }
+    delete nextEntries[fromId];
+  }
+
+  const nextSlots =
+    slots?.memory === fromId
+      ? {
+          ...slots,
+          memory: toId,
+        }
+      : slots;
+
+  return {
+    ...cfg,
+    plugins: {
+      ...cfg.plugins,
+      allow,
+      deny,
+      entries: nextEntries,
+      installs: nextInstalls,
+      slots: nextSlots,
+    },
+  };
+}
+
+function createPluginUpdateIntegrityDriftHandler(params: {
+  pluginId: string;
+  dryRun: boolean;
+  logger: PluginUpdateLogger;
+  onIntegrityDrift?: (params: PluginUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
+}) {
+  return async (drift: InstallIntegrityDrift) => {
+    const payload: PluginUpdateIntegrityDriftParams = {
+      pluginId: params.pluginId,
+      spec: drift.spec,
+      expectedIntegrity: drift.expectedIntegrity,
+      actualIntegrity: drift.actualIntegrity,
+      resolvedSpec: drift.resolution.resolvedSpec,
+      resolvedVersion: drift.resolution.version,
+      dryRun: params.dryRun,
+    };
+    if (params.onIntegrityDrift) {
+      return await params.onIntegrityDrift(payload);
+    }
+    params.logger.warn?.(
+      `Integrity drift for "${params.pluginId}" (${payload.resolvedSpec ?? payload.spec}): expected ${payload.expectedIntegrity}, got ${payload.actualIntegrity}`,
+    );
+    return true;
+  };
+}
+
+export async function updateNpmInstalledPlugins(params: {
+  config: IronAgentConfig;
+  logger?: PluginUpdateLogger;
+  pluginIds?: string[];
+  skipIds?: Set<string>;
+  dryRun?: boolean;
+  specOverrides?: Record<string, string>;
+  onIntegrityDrift?: (params: PluginUpdateIntegrityDriftParams) => boolean | Promise<boolean>;
+}): Promise<PluginUpdateSummary> {
+  const logger = params.logger ?? {};
+  const installs = params.config.plugins?.installs ?? {};
+  const targets = params.pluginIds?.length ? params.pluginIds : Object.keys(installs);
+  const outcomes: PluginUpdateOutcome[] = [];
+  let next = params.config;
+  let changed = false;
+
+  for (const pluginId of targets) {
+    if (params.skipIds?.has(pluginId)) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `Skipping "${pluginId}" (already updated).`,
+      });
+      continue;
+    }
+
+    const record = installs[pluginId];
+    if (!record) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `No install record for "${pluginId}".`,
+      });
+      continue;
+    }
+
+    if (record.source !== "npm" && record.source !== "marketplace" && record.source !== "ironhub") {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `Skipping "${pluginId}" (source: ${record.source}).`,
+      });
+      continue;
+    }
+
+    const effectiveSpec =
+      record.source === "npm" ? (params.specOverrides?.[pluginId] ?? record.spec) : record.spec;
+    const expectedIntegrity =
+      record.source === "npm" && effectiveSpec === record.spec
+        ? expectedIntegrityForUpdate(record.spec, record.integrity)
+        : undefined;
+
+    if (record.source === "npm" && !effectiveSpec) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `Skipping "${pluginId}" (missing npm spec).`,
+      });
+      continue;
+    }
+
+    if (record.source === "ironhub" && !record.ironhubPackage) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `Skipping "${pluginId}" (missing IronHub package metadata).`,
+      });
+      continue;
+    }
+
+    if (
+      record.source === "marketplace" &&
+      (!record.marketplaceSource || !record.marketplacePlugin)
+    ) {
+      outcomes.push({
+        pluginId,
+        status: "skipped",
+        message: `Skipping "${pluginId}" (missing marketplace source metadata).`,
+      });
+      continue;
+    }
+
+    let installPath: string;
+    try {
+      installPath = record.installPath ?? resolvePluginInstallDir(pluginId);
+    } catch (err) {
+      outcomes.push({
+        pluginId,
+        status: "error",
+        message: `Invalid install path for "${pluginId}": ${String(err)}`,
+      });
+      continue;
+    }
+    const currentVersion = await readInstalledPackageVersion(installPath);
+
+    if (params.dryRun) {
+      let probe:
+        | Awaited<ReturnType<typeof installPluginFromNpmSpec>>
+        | Awaited<ReturnType<typeof installPluginFromIronHub>>
+        | Awaited<ReturnType<typeof installPluginFromMarketplace>>;
+      try {
+        probe =
+          record.source === "npm"
+            ? await installPluginFromNpmSpec({
+                spec: effectiveSpec!,
+                mode: "update",
+                dryRun: true,
+                expectedPluginId: pluginId,
+                expectedIntegrity,
+                onIntegrityDrift: createPluginUpdateIntegrityDriftHandler({
+                  pluginId,
+                  dryRun: true,
+                  logger,
+                  onIntegrityDrift: params.onIntegrityDrift,
+                }),
+                logger,
+              })
+            : record.source === "ironhub"
+              ? await installPluginFromIronHub({
+                  spec: effectiveSpec ?? `ironhub:${record.ironhubPackage!}`,
+                  baseUrl: record.ironhubUrl,
+                  mode: "update",
+                  dryRun: true,
+                  expectedPluginId: pluginId,
+                  logger,
+                })
+              : await installPluginFromMarketplace({
+                  marketplace: record.marketplaceSource!,
+                  plugin: record.marketplacePlugin!,
+                  mode: "update",
+                  dryRun: true,
+                  expectedPluginId: pluginId,
+                  logger,
+                });
+      } catch (err) {
+        outcomes.push({
+          pluginId,
+          status: "error",
+          message: `Failed to check ${pluginId}: ${String(err)}`,
+        });
+        continue;
+      }
+      if (!probe.ok) {
+        outcomes.push({
+          pluginId,
+          status: "error",
+          message:
+            record.source === "npm"
+              ? formatNpmInstallFailure({
+                  pluginId,
+                  spec: effectiveSpec!,
+                  phase: "check",
+                  result: probe,
+                })
+              : record.source === "ironhub"
+                ? formatIronHubInstallFailure({
+                    pluginId,
+                    spec: effectiveSpec ?? `ironhub:${record.ironhubPackage!}`,
+                    phase: "check",
+                    error: probe.error,
+                  })
+                : formatMarketplaceInstallFailure({
+                    pluginId,
+                    marketplaceSource: record.marketplaceSource!,
+                    marketplacePlugin: record.marketplacePlugin!,
+                    phase: "check",
+                    error: probe.error,
+                  }),
+        });
+        continue;
+      }
+
+      const nextVersion = probe.version ?? "unknown";
+      const currentLabel = currentVersion ?? "unknown";
+      if (currentVersion && probe.version && currentVersion === probe.version) {
+        outcomes.push({
+          pluginId,
+          status: "unchanged",
+          currentVersion: currentVersion ?? undefined,
+          nextVersion: probe.version ?? undefined,
+          message: `${pluginId} is up to date (${currentLabel}).`,
+        });
+      } else {
+        outcomes.push({
+          pluginId,
+          status: "updated",
+          currentVersion: currentVersion ?? undefined,
+          nextVersion: probe.version ?? undefined,
+          message: `Would update ${pluginId}: ${currentLabel} -> ${nextVersion}.`,
+        });
+      }
+      continue;
+    }
+
+    let result:
+      | Awaited<ReturnType<typeof installPluginFromNpmSpec>>
+      | Awaited<ReturnType<typeof installPluginFromIronHub>>
+      | Awaited<ReturnType<typeof installPluginFromMarketplace>>;
+    try {
+      result =
+        record.source === "npm"
+          ? await installPluginFromNpmSpec({
+              spec: effectiveSpec!,
+              mode: "update",
+              expectedPluginId: pluginId,
+              expectedIntegrity,
+              onIntegrityDrift: createPluginUpdateIntegrityDriftHandler({
+                pluginId,
+                dryRun: false,
+                logger,
+                onIntegrityDrift: params.onIntegrityDrift,
+              }),
+              logger,
+            })
+          : record.source === "ironhub"
+            ? await installPluginFromIronHub({
+                spec: effectiveSpec ?? `ironhub:${record.ironhubPackage!}`,
+                baseUrl: record.ironhubUrl,
+                mode: "update",
+                expectedPluginId: pluginId,
+                logger,
+              })
+            : await installPluginFromMarketplace({
+                marketplace: record.marketplaceSource!,
+                plugin: record.marketplacePlugin!,
+                mode: "update",
+                expectedPluginId: pluginId,
+                logger,
+              });
+    } catch (err) {
+      outcomes.push({
+        pluginId,
+        status: "error",
+        message: `Failed to update ${pluginId}: ${String(err)}`,
+      });
+      continue;
+    }
+    if (!result.ok) {
+      outcomes.push({
+        pluginId,
+        status: "error",
+        message:
+          record.source === "npm"
+            ? formatNpmInstallFailure({
+                pluginId,
+                spec: effectiveSpec!,
+                phase: "update",
+                result: result,
+              })
+            : record.source === "ironhub"
+              ? formatIronHubInstallFailure({
+                  pluginId,
+                  spec: effectiveSpec ?? `ironhub:${record.ironhubPackage!}`,
+                  phase: "update",
+                  error: result.error,
+                })
+              : formatMarketplaceInstallFailure({
+                  pluginId,
+                  marketplaceSource: record.marketplaceSource!,
+                  marketplacePlugin: record.marketplacePlugin!,
+                  phase: "update",
+                  error: result.error,
+                }),
+      });
+      continue;
+    }
+
+    const resolvedPluginId = result.pluginId;
+    if (resolvedPluginId !== pluginId) {
+      next = migratePluginConfigId(next, pluginId, resolvedPluginId);
+    }
+
+    const nextVersion = result.version ?? (await readInstalledPackageVersion(result.targetDir));
+    if (record.source === "npm") {
+      next = recordPluginInstall(next, {
+        pluginId: resolvedPluginId,
+        source: "npm",
+        spec: effectiveSpec,
+        installPath: result.targetDir,
+        version: nextVersion,
+        ...buildNpmResolutionInstallFields(result.npmResolution),
+      });
+    } else if (record.source === "ironhub") {
+      const ironhubResult = result as Extract<
+        Awaited<ReturnType<typeof installPluginFromIronHub>>,
+        { ok: true }
+      >;
+      next = recordPluginInstall(next, {
+        pluginId: resolvedPluginId,
+        source: "ironhub",
+        spec: effectiveSpec ?? record.spec ?? `ironhub:${record.ironhubPackage!}`,
+        installPath: result.targetDir,
+        version: nextVersion,
+        integrity: ironhubResult.ironhub.integrity,
+        resolvedAt: ironhubResult.ironhub.resolvedAt,
+        ironhubUrl: ironhubResult.ironhub.ironhubUrl,
+        ironhubPackage: ironhubResult.ironhub.ironhubPackage,
+        ironhubFamily: ironhubResult.ironhub.ironhubFamily,
+        ironhubChannel: ironhubResult.ironhub.ironhubChannel,
+      });
+    } else {
+      const marketplaceResult = result as Extract<
+        Awaited<ReturnType<typeof installPluginFromMarketplace>>,
+        { ok: true }
+      >;
+      next = recordPluginInstall(next, {
+        pluginId: resolvedPluginId,
+        source: "marketplace",
+        installPath: result.targetDir,
+        version: nextVersion,
+        marketplaceName: marketplaceResult.marketplaceName ?? record.marketplaceName,
+        marketplaceSource: record.marketplaceSource,
+        marketplacePlugin: record.marketplacePlugin,
+      });
+    }
+    changed = true;
+
+    const currentLabel = currentVersion ?? "unknown";
+    const nextLabel = nextVersion ?? "unknown";
+    if (currentVersion && nextVersion && currentVersion === nextVersion) {
+      outcomes.push({
+        pluginId,
+        status: "unchanged",
+        currentVersion: currentVersion ?? undefined,
+        nextVersion: nextVersion ?? undefined,
+        message: `${pluginId} already at ${currentLabel}.`,
+      });
+    } else {
+      outcomes.push({
+        pluginId,
+        status: "updated",
+        currentVersion: currentVersion ?? undefined,
+        nextVersion: nextVersion ?? undefined,
+        message: `Updated ${pluginId}: ${currentLabel} -> ${nextLabel}.`,
+      });
+    }
+  }
+
+  return { config: next, changed, outcomes };
+}
+
+export async function syncPluginsForUpdateChannel(params: {
+  config: IronAgentConfig;
+  channel: UpdateChannel;
+  workspaceDir?: string;
+  env?: NodeJS.ProcessEnv;
+  logger?: PluginUpdateLogger;
+}): Promise<PluginChannelSyncResult> {
+  const env = params.env ?? process.env;
+  const summary: PluginChannelSyncSummary = {
+    switchedToBundled: [],
+    switchedToNpm: [],
+    warnings: [],
+    errors: [],
+  };
+  const bundled = resolveBundledPluginSources({
+    workspaceDir: params.workspaceDir,
+    env,
+  });
+  if (bundled.size === 0) {
+    return { config: params.config, changed: false, summary };
+  }
+
+  let next = params.config;
+  const loadHelpers = buildLoadPathHelpers(next.plugins?.load?.paths ?? [], env);
+  const installs = next.plugins?.installs ?? {};
+  let changed = false;
+
+  if (params.channel === "dev") {
+    for (const [pluginId, record] of Object.entries(installs)) {
+      const bundledInfo = bundled.get(pluginId);
+      if (!bundledInfo) {
+        continue;
+      }
+
+      loadHelpers.addPath(bundledInfo.localPath);
+
+      const alreadyBundled =
+        record.source === "path" && pathsEqual(record.sourcePath, bundledInfo.localPath, env);
+      if (alreadyBundled) {
+        continue;
+      }
+
+      next = recordPluginInstall(next, {
+        pluginId,
+        source: "path",
+        sourcePath: bundledInfo.localPath,
+        installPath: bundledInfo.localPath,
+        spec: record.spec ?? bundledInfo.npmSpec,
+        version: record.version,
+      });
+      summary.switchedToBundled.push(pluginId);
+      changed = true;
+    }
+  } else {
+    for (const [pluginId, record] of Object.entries(installs)) {
+      const bundledInfo = bundled.get(pluginId);
+      if (!bundledInfo) {
+        continue;
+      }
+
+      if (record.source === "npm") {
+        loadHelpers.removePath(bundledInfo.localPath);
+        continue;
+      }
+
+      if (record.source !== "path") {
+        continue;
+      }
+      if (!pathsEqual(record.sourcePath, bundledInfo.localPath, env)) {
+        continue;
+      }
+      // Keep explicit bundled installs on release channels. Replacing them with
+      // npm installs can reintroduce duplicate-id shadowing and packaging drift.
+      loadHelpers.addPath(bundledInfo.localPath);
+      const alreadyBundled =
+        record.source === "path" &&
+        pathsEqual(record.sourcePath, bundledInfo.localPath, env) &&
+        pathsEqual(record.installPath, bundledInfo.localPath, env);
+      if (alreadyBundled) {
+        continue;
+      }
+
+      next = recordPluginInstall(next, {
+        pluginId,
+        source: "path",
+        sourcePath: bundledInfo.localPath,
+        installPath: bundledInfo.localPath,
+        spec: record.spec ?? bundledInfo.npmSpec,
+        version: record.version,
+      });
+      changed = true;
+    }
+  }
+
+  if (loadHelpers.changed) {
+    next = {
+      ...next,
+      plugins: {
+        ...next.plugins,
+        load: {
+          ...next.plugins?.load,
+          paths: loadHelpers.paths,
+        },
+      },
+    };
+    changed = true;
+  }
+
+  return { config: next, changed, summary };
+}

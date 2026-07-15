@@ -1,0 +1,64 @@
+# ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ironagent-cli-config
+  namespace: ironagent
+
+data:
+  HOME: "/home/node"
+  TERM: "xterm-256color"
+  BROWSER: "echo"
+  TZ: "UTC"
+  IRONAGENT_CONFIG_DIR: "/home/node/.ironagent"
+  IRONAGENT_GATEWAY_URL: "ws://ironagent-gateway:18789"
+
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-cli
+  namespace: ironagent
+
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ironagent-cli
+  template:
+    metadata:
+      labels:
+        app: ironagent-cli
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ironagent-worker
+      containers:
+      - name: ironagent-cli
+        image: localhost/ironagent:main-20260417
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: ironagent-cli-config
+        - secretRef:
+            name: ironagent-gateway-secret
+        command:
+        - sh
+        - -lc
+        - sleep infinity
+        volumeMounts:
+        - name: ironagent-home
+          mountPath: /home/node/.ironagent
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - NET_RAW
+            - NET_ADMIN
+        stdin: true
+        tty: true
+      volumes:
+      - name: ironagent-home
+        hostPath:
+          path: /app/ironagent/.ironagent
+          type: DirectoryOrCreate

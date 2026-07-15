@@ -1,0 +1,54 @@
+# Protect the ownership rules themselves.
+/.github/CODEOWNERS @steipete
+
+# WARNING: GitHub CODEOWNERS uses last-match-wins semantics.
+# If you add overlapping rules below the secops block, include @ironagent/secops
+# on those entries too or you can silently remove required secops review.
+# Security-sensitive code, config, and docs require secops review.
+/SECURITY.md @ironagent/secops
+/.github/dependabot.yml @ironagent/secops
+/.github/codeql/ @ironagent/secops
+/.github/workflows/codeql.yml @ironagent/secops
+/src/security/ @ironagent/secops
+/src/secrets/ @ironagent/secops
+/src/config/*secret*.ts @ironagent/secops
+/src/config/**/*secret*.ts @ironagent/secops
+/src/gateway/*auth*.ts @ironagent/secops
+/src/gateway/**/*auth*.ts @ironagent/secops
+/src/gateway/*secret*.ts @ironagent/secops
+/src/gateway/**/*secret*.ts @ironagent/secops
+/src/gateway/security-path*.ts @ironagent/secops
+/src/gateway/resolve-configured-secret-input-string*.ts @ironagent/secops
+/src/gateway/protocol/**/*secret*.ts @ironagent/secops
+/src/gateway/server-methods/secrets*.ts @ironagent/secops
+/src/agents/*auth*.ts @ironagent/secops
+/src/agents/**/*auth*.ts @ironagent/secops
+/src/agents/auth-profiles*.ts @ironagent/secops
+/src/agents/auth-health*.ts @ironagent/secops
+/src/agents/auth-profiles/ @ironagent/secops
+/src/agents/sandbox.ts @ironagent/secops
+/src/agents/sandbox-*.ts @ironagent/secops
+/src/agents/sandbox/ @ironagent/secops
+/src/infra/secret-file*.ts @ironagent/secops
+/src/cron/stagger.ts @ironagent/secops
+/src/cron/service/jobs.ts @ironagent/secops
+/docs/security/ @ironagent/secops
+/docs/gateway/authentication.md @ironagent/secops
+/docs/gateway/sandbox-vs-tool-policy-vs-elevated.md @ironagent/secops
+/docs/gateway/sandboxing.md @ironagent/secops
+/docs/gateway/secrets-plan-contract.md @ironagent/secops
+/docs/gateway/secrets.md @ironagent/secops
+/docs/gateway/security/ @ironagent/secops
+/docs/cli/approvals.md @ironagent/secops
+/docs/cli/sandbox.md @ironagent/secops
+/docs/cli/security.md @ironagent/secops
+/docs/cli/secrets.md @ironagent/secops
+/docs/reference/secretref-credential-surface.md @ironagent/secops
+/docs/reference/secretref-user-supplied-credentials-matrix.json @ironagent/secops
+
+# Release workflow and its supporting release-path checks.
+/.github/workflows/ironagent-npm-release.yml @ironagent/ironagent-release-managers
+/docs/reference/RELEASING.md @ironagent/ironagent-release-managers
+/scripts/ironagent-npm-publish.sh @ironagent/ironagent-release-managers
+/scripts/ironagent-npm-release-check.ts @ironagent/ironagent-release-managers
+/scripts/release-check.ts @ironagent/ironagent-release-managers

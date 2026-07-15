@@ -1,0 +1,12 @@
+{
+  "name": "@ironagent/ironagent-bridge-plugin",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent IronAgent bridge plugin",
+  "type": "module",
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

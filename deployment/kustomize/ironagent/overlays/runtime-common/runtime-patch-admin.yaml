@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+spec:
+  template:
+    spec:
+      hostPID: true
+      nodeSelector:
+        kubernetes.io/hostname: ironagent-worker
+      hostAliases:
+        - ip: 192.0.2.20
+          hostnames:
+            - mysql.example.internal
+        - ip: 192.0.2.21
+          hostnames:
+            - cos.example.invalid
+      containers:
+        - name: admin
+          securityContext:
+            allowPrivilegeEscalation: true
+            privileged: true

@@ -1,0 +1,60 @@
+services:
+  security-service:
+    image: ironagent-security-service:dev
+    restart: unless-stopped
+    command: [".venv/bin/uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      IRONAGENT_HOST: 0.0.0.0
+      IRONAGENT_PORT: 8000
+      # 关键要求：这里必须使用“宿主机真实存在的绝对路径”，并且在容器里保持同样的路径。
+      # 这样 security-service 通过 /var/run/docker.sock 动态创建助手容器时，
+      # 传给 Docker daemon 的 bind source 才是宿主机可识别的路径。
+      # 另外，${IRONAGENT_STACK_ROOT}/config 不能是空目录，里面必须放入 IronAgent 的实际配置文件。
+      IRONAGENT_CONFIG_DIR: ${IRONAGENT_STACK_ROOT}/config
+      IRONAGENT_AUDIT_LOG_PATH: ${IRONAGENT_STACK_ROOT}/data/audit/audit.jsonl
+      IRONAGENT_ASSISTANTS_STORE_PATH: ${IRONAGENT_STACK_ROOT}/data/assistants/assistants.json
+      IRONAGENT_APPROVAL_STORE_PATH: ${IRONAGENT_STACK_ROOT}/data/approvals/approvals.json
+      IRONAGENT_ASSISTANTS_WORKSPACE_ROOT: ${IRONAGENT_STACK_ROOT}/data/workspaces
+      IRONAGENT_ASSISTANTS_RUNTIME_ROOT: ${IRONAGENT_STACK_ROOT}/data/runtimes
+      # 如果你要做完全本地的技能验收，可以在
+      # ${IRONAGENT_STACK_ROOT}/data/workspaces/<assistant-id>/skills/
+      # 预先复制 office-docs 和 local-pdf，再开始第一次聊天。
+      # 只有复用宿主机 ~/.ironagent 登录态时才需要真实内容；
+      # 如果走助手级 API Key，可以把 ./host-ironagent 保持为空目录。
+      IRONAGENT_HOST_IRONAGENT_ROOT: ${IRONAGENT_STACK_ROOT}/host-ironagent
+      IRONAGENT_IRONAGENT_CONTAINER_IMAGE: ironagent-ironagent:dev
+      IRONAGENT_IRONAGENT_HOOKS_ENABLED: "true"
+      IRONAGENT_IRONAGENT_HOOK_FAIL_CLOSED: "true"
+      IRONAGENT_IRONAGENT_HOOK_TIMEOUT_MS: "5000"
+      # Docker Desktop 上可直接用 http://host.docker.internal:8000
+      # Linux 主机请改成宿主机可被子容器访问的 IP，例如 http://192.168.1.10:8000
+      IRONAGENT_IRONAGENT_HOOK_SERVICE_URL: http://host.docker.internal:8000
+      # 建议保持 127.0.0.1，只在宿主机本地访问助手网关；如需局域网访问再改成 0.0.0.0
+      IRONAGENT_IRONAGENT_GATEWAY_HOST: 127.0.0.1
+      IRONAGENT_IRONAGENT_GATEWAY_PORT: "18789"
+      IRONAGENT_IRONAGENT_GATEWAY_BIND: lan
+    volumes:
+      # 把整个部署根目录以“相同绝对路径”挂进容器，供 security-service 动态编排助手容器时复用。
+      - ${IRONAGENT_STACK_ROOT}:${IRONAGENT_STACK_ROOT}
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  admin:
+    image: ironagent-admin:dev
+    restart: unless-stopped
+    command:
+      [".venv/bin/streamlit", "run", "src/admin/app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    depends_on:
+      - security-service
+    ports:
+      - "8501:8501"
+    environment:
+      IRONAGENT_CONFIG_DIR: ${IRONAGENT_STACK_ROOT}/config
+      IRONAGENT_AUDIT_LOG_PATH: ${IRONAGENT_STACK_ROOT}/data/audit/audit.jsonl
+      IRONAGENT_ASSISTANTS_STORE_PATH: ${IRONAGENT_STACK_ROOT}/data/assistants/assistants.json
+      IRONAGENT_APPROVAL_STORE_PATH: ${IRONAGENT_STACK_ROOT}/data/approvals/approvals.json
+      IRONAGENT_ASSISTANTS_WORKSPACE_ROOT: ${IRONAGENT_STACK_ROOT}/data/workspaces
+      IRONAGENT_ASSISTANTS_RUNTIME_ROOT: ${IRONAGENT_STACK_ROOT}/data/runtimes
+    volumes:
+      - ${IRONAGENT_STACK_ROOT}:${IRONAGENT_STACK_ROOT}

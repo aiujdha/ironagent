@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ironagent-gateway
+  template:
+    metadata:
+      labels:
+        app: ironagent-gateway
+    spec:
+      containers:
+        - name: ironagent-gateway
+          image: localhost/ironagent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: gateway
+              containerPort: 18789
+            - name: bridge
+              containerPort: 18790
+          envFrom:
+            - configMapRef:
+                name: ironagent-gateway-config
+            - secretRef:
+                name: ironagent-gateway-secret
+          command:
+            - sh
+            - -lc
+            - |
+              set -e
+              entry=/app/dist/index.mjs
+              [ -f "$entry" ] || entry=/app/dist/index.js
+              node "$entry" config set gateway.mode local >/dev/null
+              node "$entry" config set gateway.bind "$IRONAGENT_GATEWAY_BIND" >/dev/null
+              node "$entry" config set gateway.auth.mode token >/dev/null
+              node "$entry" config set gateway.controlUi.allowedOrigins "$IRONAGENT_GATEWAY_ALLOWED_ORIGINS" --strict-json >/dev/null
+              node "$entry" config unset gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback >/dev/null || true
+              node "$entry" config unset gateway.controlUi.dangerouslyDisableDeviceAuth >/dev/null || true
+              exec node "$entry" gateway run --allow-unconfigured --bind "$IRONAGENT_GATEWAY_BIND" --port "$IRONAGENT_GATEWAY_PORT"
+          volumeMounts:
+            - name: ironagent-home
+              mountPath: /app/ironagent/.ironagent
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 250m
+              memory: 768Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: gateway
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+      volumes:
+        - name: ironagent-home
+          hostPath:
+            path: /app/ironagent/.ironagent
+            type: DirectoryOrCreate

@@ -1,0 +1,339 @@
+name: IronAgent
+options:
+  bundleIdPrefix: ai.ironagent
+  deploymentTarget:
+    iOS: "18.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+
+packages:
+  IronAgentKit:
+    path: ../shared/IronAgentKit
+  Swabble:
+    path: ../../Swabble
+
+schemes:
+  IronAgent:
+    shared: true
+    build:
+      targets:
+        IronAgent: all
+    test:
+      targets:
+        - IronAgentTests
+        - IronAgentLogicTests
+  IronAgentLogicTests:
+    shared: true
+    build:
+      targets:
+        IronAgentLogicTests: all
+    test:
+      targets:
+        - IronAgentLogicTests
+
+targets:
+  IronAgent:
+    type: application
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources:
+      - path: Sources
+    dependencies:
+      - target: IronAgentShareExtension
+        embed: true
+      - target: IronAgentActivityWidget
+        embed: true
+      - target: IronAgentWatchApp
+      - package: IronAgentKit
+      - package: IronAgentKit
+        product: IronAgentChatUI
+      - package: IronAgentKit
+        product: IronAgentProtocol
+      - package: Swabble
+        product: SwabbleKit
+      - sdk: AppIntents.framework
+    preBuildScripts:
+      - name: SwiftFormat (lint)
+        basedOnDependencyAnalysis: false
+        inputFileLists:
+          - $(SRCROOT)/SwiftSources.input.xcfilelist
+        script: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          if ! command -v swiftformat >/dev/null 2>&1; then
+            echo "error: swiftformat not found (brew install swiftformat)" >&2
+            exit 1
+          fi
+          swiftformat --lint --config "$SRCROOT/../../.swiftformat" \
+            --filelist "$SRCROOT/SwiftSources.input.xcfilelist"
+      - name: SwiftLint
+        basedOnDependencyAnalysis: false
+        inputFileLists:
+          - $(SRCROOT)/SwiftSources.input.xcfilelist
+        script: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          if ! command -v swiftlint >/dev/null 2>&1; then
+            echo "error: swiftlint not found (brew install swiftlint)" >&2
+            exit 1
+          fi
+          swiftlint lint --config "$SRCROOT/.swiftlint.yml" --use-script-input-file-lists
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_ENTITLEMENTS: Sources/IronAgent.entitlements
+        CODE_SIGN_STYLE: "$(IRONAGENT_CODE_SIGN_STYLE)"
+        DEVELOPMENT_TEAM: "$(IRONAGENT_DEVELOPMENT_TEAM)"
+        PRODUCT_BUNDLE_IDENTIFIER: "$(IRONAGENT_APP_BUNDLE_ID)"
+        PROVISIONING_PROFILE_SPECIFIER: "$(IRONAGENT_APP_PROFILE)"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SUPPORTS_LIVE_ACTIVITIES: YES
+        ENABLE_APPINTENTS_METADATA: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+      configs:
+        Debug:
+          IRONAGENT_PUSH_TRANSPORT: direct
+          IRONAGENT_PUSH_DISTRIBUTION: local
+          IRONAGENT_PUSH_RELAY_BASE_URL: ""
+          IRONAGENT_PUSH_APNS_ENVIRONMENT: sandbox
+        Release:
+          IRONAGENT_PUSH_TRANSPORT: direct
+          IRONAGENT_PUSH_DISTRIBUTION: local
+          IRONAGENT_PUSH_RELAY_BASE_URL: ""
+          IRONAGENT_PUSH_APNS_ENVIRONMENT: production
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgent
+        CFBundleIconName: AppIcon
+        CFBundleURLTypes:
+          - CFBundleURLName: ai.ironagent.ios
+            CFBundleURLSchemes:
+              - ironagent
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - audio
+          - remote-notification
+        BGTaskSchedulerPermittedIdentifiers:
+          - ai.ironagent.ios.bgrefresh
+        NSLocalNetworkUsageDescription: IronAgent discovers and connects to your IronAgent gateway on the local network.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoadsInWebContent: true
+        NSBonjourServices:
+          - _ironagent-gw._tcp
+        NSCameraUsageDescription: IronAgent can capture photos or short video clips when requested via the gateway.
+        NSLocationWhenInUseUsageDescription: IronAgent uses your location when you allow location sharing.
+        NSLocationAlwaysAndWhenInUseUsageDescription: IronAgent can share your location in the background when you enable Always.
+        NSMicrophoneUsageDescription: IronAgent needs microphone access for voice wake.
+        NSMotionUsageDescription: IronAgent may use motion data to support device-aware interactions and automations.
+        NSPhotoLibraryUsageDescription: IronAgent needs photo library access when you choose existing photos to share with your assistant.
+        NSSpeechRecognitionUsageDescription: IronAgent uses on-device speech recognition for voice wake.
+        NSSupportsLiveActivities: true
+        ITSAppUsesNonExemptEncryption: false
+        IronAgentPushTransport: "$(IRONAGENT_PUSH_TRANSPORT)"
+        IronAgentPushDistribution: "$(IRONAGENT_PUSH_DISTRIBUTION)"
+        IronAgentPushRelayBaseURL: "$(IRONAGENT_PUSH_RELAY_BASE_URL)"
+        IronAgentPushAPNsEnvironment: "$(IRONAGENT_PUSH_APNS_ENVIRONMENT)"
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+
+  IronAgentShareExtension:
+    type: app-extension
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources:
+      - path: ShareExtension
+    dependencies:
+      - package: IronAgentKit
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "$(IRONAGENT_CODE_SIGN_STYLE)"
+        DEVELOPMENT_TEAM: "$(IRONAGENT_DEVELOPMENT_TEAM)"
+        ENABLE_APPINTENTS_METADATA: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        PRODUCT_BUNDLE_IDENTIFIER: "$(IRONAGENT_SHARE_BUNDLE_ID)"
+        PROVISIONING_PROFILE_SPECIFIER: "$(IRONAGENT_SHARE_PROFILE)"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgent Share
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: "$(PRODUCT_MODULE_NAME).ShareViewController"
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsText: true
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsImageWithMaxCount: 10
+              NSExtensionActivationSupportsMovieWithMaxCount: 1
+
+  IronAgentActivityWidget:
+    type: app-extension
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources:
+      - path: ActivityWidget
+      - path: Sources/LiveActivity/IronAgentActivityAttributes.swift
+    dependencies:
+      - sdk: WidgetKit.framework
+      - sdk: ActivityKit.framework
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "$(IRONAGENT_CODE_SIGN_STYLE)"
+        DEVELOPMENT_TEAM: "$(IRONAGENT_DEVELOPMENT_TEAM)"
+        PRODUCT_BUNDLE_IDENTIFIER: "$(IRONAGENT_ACTIVITY_WIDGET_BUNDLE_ID)"
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        SUPPORTS_LIVE_ACTIVITIES: YES
+    info:
+      path: ActivityWidget/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgent Activity
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+        NSSupportsLiveActivities: true
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+
+  IronAgentWatchApp:
+    type: application.watchapp2
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: WatchApp
+    dependencies:
+      - target: IronAgentWatchExtension
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APPINTENTS_METADATA: NO
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        PRODUCT_BUNDLE_IDENTIFIER: "$(IRONAGENT_WATCH_APP_BUNDLE_ID)"
+    info:
+      path: WatchApp/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgent
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+        WKCompanionAppBundleIdentifier: "$(IRONAGENT_APP_BUNDLE_ID)"
+        WKWatchKitApp: true
+
+  IronAgentWatchExtension:
+    type: watchkit2-extension
+    platform: watchOS
+    deploymentTarget: "11.0"
+    sources:
+      - path: WatchExtension/Sources
+    dependencies:
+      - sdk: AppIntents.framework
+      - sdk: WatchConnectivity.framework
+      - sdk: UserNotifications.framework
+    configFiles:
+      Debug: Config/Signing.xcconfig
+      Release: Config/Signing.xcconfig
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(IRONAGENT_WATCH_EXTENSION_BUNDLE_ID)"
+    info:
+      path: WatchExtension/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgent
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+        NSExtension:
+          NSExtensionAttributes:
+            WKAppBundleIdentifier: "$(IRONAGENT_WATCH_APP_BUNDLE_ID)"
+          NSExtensionPointIdentifier: com.apple.watchkit
+
+  IronAgentTests:
+    type: bundle.unit-test
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources:
+      - path: Tests
+        excludes:
+          - Logic
+    dependencies:
+      - target: IronAgent
+      - package: Swabble
+        product: SwabbleKit
+      - sdk: AppIntents.framework
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "$(IRONAGENT_CODE_SIGN_STYLE)"
+        DEVELOPMENT_TEAM: "$(IRONAGENT_DEVELOPMENT_TEAM)"
+        PRODUCT_BUNDLE_IDENTIFIER: ai.ironagent.ios.tests
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/IronAgent.app/IronAgent"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+    info:
+      path: Tests/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgentTests
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"
+
+  IronAgentLogicTests:
+    type: bundle.unit-test
+    platform: iOS
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
+    sources:
+      - path: Tests/Logic
+    dependencies:
+      - package: IronAgentKit
+    settings:
+      base:
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "$(IRONAGENT_CODE_SIGN_STYLE)"
+        DEVELOPMENT_TEAM: "$(IRONAGENT_DEVELOPMENT_TEAM)"
+        PRODUCT_BUNDLE_IDENTIFIER: ai.ironagent.ios.logic-tests
+        ENABLE_APP_INTENTS_METADATA_GENERATION: NO
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+    info:
+      path: Tests/Info.plist
+      properties:
+        CFBundleDisplayName: IronAgentLogicTests
+        CFBundleShortVersionString: "$(IRONAGENT_MARKETING_VERSION)"
+        CFBundleVersion: "$(IRONAGENT_BUILD_VERSION)"

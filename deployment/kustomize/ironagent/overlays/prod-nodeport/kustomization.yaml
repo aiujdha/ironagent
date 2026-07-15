@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: ironagent
+
+resources:
+  - ../runtime-common
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: ironagent-gateway-config
+    envs:
+      - config/gateway.env
+  - name: ironagent-cli-config
+    envs:
+      - config/cli.env
+  - name: control-plane-shared-config
+    envs:
+      - config/control-plane-shared.env
+
+secretGenerator:
+  - name: ironagent-gateway-secret
+    envs:
+      - secret/gateway.env
+  - name: control-plane-shared-secret
+    envs:
+      - secret/control-plane.env
+
+patches:
+  - path: service-nodeports-gateway.yaml
+    target:
+      kind: Service
+      name: ironagent-gateway
+  - path: service-nodeports-admin.yaml
+    target:
+      kind: Service
+      name: admin
+  - path: service-nodeports-security-service.yaml
+    target:
+      kind: Service
+      name: security-service

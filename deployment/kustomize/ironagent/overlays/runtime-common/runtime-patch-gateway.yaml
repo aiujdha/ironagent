@@ -1,0 +1,9 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ironagent-gateway
+spec:
+  template:
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: ironagent-worker

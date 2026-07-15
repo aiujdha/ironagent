@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+.env.local
+.env.*.local
+coverage
+src/ui/__screenshots__/
+playwright-report/
+test-results/
+.vitest-attachments
+.DS_Store

@@ -1,0 +1,824 @@
+---
+summary: "Integrated browser control service + action commands"
+read_when:
+  - Adding agent-controlled browser automation
+  - Debugging why ironagent is interfering with your own Chrome
+  - Implementing browser settings + lifecycle in the macOS app
+title: "Browser (IronAgent-managed)"
+---
+
+# Browser (ironagent-managed)
+
+IronAgent can run a **dedicated Chrome/Brave/Edge/Chromium profile** that the agent controls.
+It is isolated from your personal browser and is managed through a small local
+control service inside the Gateway (loopback only).
+
+Beginner view:
+
+- Think of it as a **separate, agent-only browser**.
+- The `ironagent` profile does **not** touch your personal browser profile.
+- The agent can **open tabs, read pages, click, and type** in a safe lane.
+- The built-in `user` profile attaches to your real signed-in Chrome session via Chrome MCP.
+
+## What you get
+
+- A separate browser profile named **ironagent** (orange accent by default).
+- Deterministic tab control (list/open/focus/close).
+- Agent actions (click/type/drag/select), snapshots, screenshots, PDFs.
+- Optional multi-profile support (`ironagent`, `work`, `remote`, ...).
+
+This browser is **not** your daily driver. It is a safe, isolated surface for
+agent automation and verification.
+
+## Quick start
+
+```bash
+ironagent browser --browser-profile ironagent status
+ironagent browser --browser-profile ironagent start
+ironagent browser --browser-profile ironagent open https://example.com
+ironagent browser --browser-profile ironagent snapshot
+```
+
+If you get “Browser disabled”, enable it in config (see below) and restart the
+Gateway.
+
+If `ironagent browser` is missing entirely, or the agent says the browser tool
+is unavailable, jump to [Missing browser command or tool](/tools/browser#missing-browser-command-or-tool).
+
+## Plugin control
+
+The default `browser` tool is now a bundled plugin that ships enabled by
+default. That means you can disable or replace it without removing the rest of
+IronAgent's plugin system:
+
+```json5
+{
+  plugins: {
+    entries: {
+      browser: {
+        enabled: false,
+      },
+    },
+  },
+}
+```
+
+Disable the bundled plugin before installing another plugin that provides the
+same `browser` tool name. The default browser experience needs both:
+
+- `plugins.entries.browser.enabled` not disabled
+- `browser.enabled=true`
+
+If you turn off only the plugin, the bundled browser CLI (`ironagent browser`),
+gateway method (`browser.request`), agent tool, and default browser control
+service all disappear together. Your `browser.*` config stays intact for a
+replacement plugin to reuse.
+
+The bundled browser plugin also owns the browser runtime implementation now.
+Core keeps only shared Plugin SDK helpers plus compatibility re-exports for
+older internal import paths. In practice, removing or replacing the browser
+plugin package removes the browser feature set instead of leaving a second
+core-owned runtime behind.
+
+Browser config changes still require a Gateway restart so the bundled plugin
+can re-register its browser service with the new settings.
+
+## Missing browser command or tool
+
+If `ironagent browser` suddenly becomes an unknown command after an upgrade, or
+the agent reports that the browser tool is missing, the most common cause is a
+restrictive `plugins.allow` list that does not include `browser`.
+
+Example broken config:
+
+```json5
+{
+  plugins: {
+    allow: ["telegram"],
+  },
+}
+```
+
+Fix it by adding `browser` to the plugin allowlist:
+
+```json5
+{
+  plugins: {
+    allow: ["telegram", "browser"],
+  },
+}
+```
+
+Important notes:
+
+- `browser.enabled=true` is not enough by itself when `plugins.allow` is set.
+- `plugins.entries.browser.enabled=true` is also not enough by itself when `plugins.allow` is set.
+- `tools.alsoAllow: ["browser"]` does **not** load the bundled browser plugin. It only adjusts tool policy after the plugin is already loaded.
+- If you do not need a restrictive plugin allowlist, removing `plugins.allow` also restores the default bundled browser behavior.
+
+Typical symptoms:
+
+- `ironagent browser` is an unknown command.
+- `browser.request` is missing.
+- The agent reports the browser tool as unavailable or missing.
+
+## Profiles: `ironagent` vs `user`
+
+- `ironagent`: managed, isolated browser (no extension required).
+- `user`: built-in Chrome MCP attach profile for your **real signed-in Chrome**
+  session.
+
+For agent browser tool calls:
+
+- Default: use the isolated `ironagent` browser.
+- Prefer `profile="user"` when existing logged-in sessions matter and the user
+  is at the computer to click/approve any attach prompt.
+- `profile` is the explicit override when you want a specific browser mode.
+
+Set `browser.defaultProfile: "ironagent"` if you want managed mode by default.
+
+## Configuration
+
+Browser settings live in `~/.ironagent/ironagent.json`.
+
+```json5
+{
+  browser: {
+    enabled: true, // default: true
+    ssrfPolicy: {
+      dangerouslyAllowPrivateNetwork: true, // default trusted-network mode
+      // allowPrivateNetwork: true, // legacy alias
+      // hostnameAllowlist: ["*.example.com", "example.com"],
+      // allowedHostnames: ["localhost"],
+    },
+    // cdpUrl: "http://127.0.0.1:18792", // legacy single-profile override
+    remoteCdpTimeoutMs: 1500, // remote CDP HTTP timeout (ms)
+    remoteCdpHandshakeTimeoutMs: 3000, // remote CDP WebSocket handshake timeout (ms)
+    defaultProfile: "ironagent",
+    color: "#FF4500",
+    headless: false,
+    noSandbox: false,
+    attachOnly: false,
+    executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    profiles: {
+      ironagent: { cdpPort: 18800, color: "#FF4500" },
+      work: { cdpPort: 18801, color: "#0066CC" },
+      user: {
+        driver: "existing-session",
+        attachOnly: true,
+        color: "#00AA00",
+      },
+      brave: {
+        driver: "existing-session",
+        attachOnly: true,
+        userDataDir: "~/Library/Application Support/BraveSoftware/Brave-Browser",
+        color: "#FB542B",
+      },
+      remote: { cdpUrl: "http://10.0.0.42:9222", color: "#00AA00" },
+    },
+  },
+}
+```
+
+Notes:
+
+- The browser control service binds to loopback on a port derived from `gateway.port`
+  (default: `18791`, which is gateway + 2).
+- If you override the Gateway port (`gateway.port` or `IRONAGENT_GATEWAY_PORT`),
+  the derived browser ports shift to stay in the same “family”.
+- `cdpUrl` defaults to the managed local CDP port when unset.
+- `remoteCdpTimeoutMs` applies to remote (non-loopback) CDP reachability checks.
+- `remoteCdpHandshakeTimeoutMs` applies to remote CDP WebSocket reachability checks.
+- Browser navigation/open-tab is SSRF-guarded before navigation and best-effort re-checked on final `http(s)` URL after navigation.
+- In strict SSRF mode, remote CDP endpoint discovery/probes (`cdpUrl`, including `/json/version` lookups) are checked too.
+- `browser.ssrfPolicy.dangerouslyAllowPrivateNetwork` defaults to `true` (trusted-network model). Set it to `false` for strict public-only browsing.
+- `browser.ssrfPolicy.allowPrivateNetwork` remains supported as a legacy alias for compatibility.
+- `attachOnly: true` means “never launch a local browser; only attach if it is already running.”
+- `color` + per-profile `color` tint the browser UI so you can see which profile is active.
+- Default profile is `ironagent` (IronAgent-managed standalone browser). Use `defaultProfile: "user"` to opt into the signed-in user browser.
+- Auto-detect order: system default browser if Chromium-based; otherwise Chrome → Brave → Edge → Chromium → Chrome Canary.
+- Local `ironagent` profiles auto-assign `cdpPort`/`cdpUrl` — set those only for remote CDP.
+- `driver: "existing-session"` uses Chrome DevTools MCP instead of raw CDP. Do
+  not set `cdpUrl` for that driver.
+- Set `browser.profiles.<name>.userDataDir` when an existing-session profile
+  should attach to a non-default Chromium user profile such as Brave or Edge.
+
+## Use Brave (or another Chromium-based browser)
+
+If your **system default** browser is Chromium-based (Chrome/Brave/Edge/etc),
+IronAgent uses it automatically. Set `browser.executablePath` to override
+auto-detection:
+
+CLI example:
+
+```bash
+ironagent config set browser.executablePath "/usr/bin/google-chrome"
+```
+
+```json5
+// macOS
+{
+  browser: {
+    executablePath: "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"
+  }
+}
+
+// Windows
+{
+  browser: {
+    executablePath: "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+  }
+}
+
+// Linux
+{
+  browser: {
+    executablePath: "/usr/bin/brave-browser"
+  }
+}
+```
+
+## Local vs remote control
+
+- **Local control (default):** the Gateway starts the loopback control service and can launch a local browser.
+- **Remote control (node host):** run a node host on the machine that has the browser; the Gateway proxies browser actions to it.
+- **Remote CDP:** set `browser.profiles.<name>.cdpUrl` (or `browser.cdpUrl`) to
+  attach to a remote Chromium-based browser. In this case, IronAgent will not launch a local browser.
+
+Remote CDP URLs can include auth:
+
+- Query tokens (e.g., `https://provider.example?token=<token>`)
+- HTTP Basic auth (e.g., `https://user:pass@provider.example`)
+
+IronAgent preserves the auth when calling `/json/*` endpoints and when connecting
+to the CDP WebSocket. Prefer environment variables or secrets managers for
+tokens instead of committing them to config files.
+
+## Node browser proxy (zero-config default)
+
+If you run a **node host** on the machine that has your browser, IronAgent can
+auto-route browser tool calls to that node without any extra browser config.
+This is the default path for remote gateways.
+
+Notes:
+
+- The node host exposes its local browser control server via a **proxy command**.
+- Profiles come from the node’s own `browser.profiles` config (same as local).
+- `nodeHost.browserProxy.allowProfiles` is optional. Leave it empty for the legacy/default behavior: all configured profiles remain reachable through the proxy, including profile create/delete routes.
+- If you set `nodeHost.browserProxy.allowProfiles`, IronAgent treats it as a least-privilege boundary: only allowlisted profiles can be targeted, and persistent profile create/delete routes are blocked on the proxy surface.
+- Disable if you don’t want it:
+  - On the node: `nodeHost.browserProxy.enabled=false`
+  - On the gateway: `gateway.nodes.browser.mode="off"`
+
+## Browserless (hosted remote CDP)
+
+[Browserless](https://browserless.io) is a hosted Chromium service that exposes
+CDP connection URLs over HTTPS and WebSocket. IronAgent can use either form, but
+for a remote browser profile the simplest option is the direct WebSocket URL
+from Browserless' connection docs.
+
+Example:
+
+```json5
+{
+  browser: {
+    enabled: true,
+    defaultProfile: "browserless",
+    remoteCdpTimeoutMs: 2000,
+    remoteCdpHandshakeTimeoutMs: 4000,
+    profiles: {
+      browserless: {
+        cdpUrl: "wss://production-sfo.browserless.io?token=<BROWSERLESS_API_KEY>",
+        color: "#00AA00",
+      },
+    },
+  },
+}
+```
+
+Notes:
+
+- Replace `<BROWSERLESS_API_KEY>` with your real Browserless token.
+- Choose the region endpoint that matches your Browserless account (see their docs).
+- If Browserless gives you an HTTPS base URL, you can either convert it to
+  `wss://` for a direct CDP connection or keep the HTTPS URL and let IronAgent
+  discover `/json/version`.
+
+## Direct WebSocket CDP providers
+
+Some hosted browser services expose a **direct WebSocket** endpoint rather than
+the standard HTTP-based CDP discovery (`/json/version`). IronAgent supports both:
+
+- **HTTP(S) endpoints** — IronAgent calls `/json/version` to discover the
+  WebSocket debugger URL, then connects.
+- **WebSocket endpoints** (`ws://` / `wss://`) — IronAgent connects directly,
+  skipping `/json/version`. Use this for services like
+  [Browserless](https://browserless.io),
+  [Browserbase](https://www.browserbase.com), or any provider that hands you a
+  WebSocket URL.
+
+### Browserbase
+
+[Browserbase](https://www.browserbase.com) is a cloud platform for running
+headless browsers with built-in CAPTCHA solving, stealth mode, and residential
+proxies.
+
+```json5
+{
+  browser: {
+    enabled: true,
+    defaultProfile: "browserbase",
+    remoteCdpTimeoutMs: 3000,
+    remoteCdpHandshakeTimeoutMs: 5000,
+    profiles: {
+      browserbase: {
+        cdpUrl: "wss://connect.browserbase.com?apiKey=<BROWSERBASE_API_KEY>",
+        color: "#F97316",
+      },
+    },
+  },
+}
+```
+
+Notes:
+
+- [Sign up](https://www.browserbase.com/sign-up) and copy your **API Key**
+  from the [Overview dashboard](https://www.browserbase.com/overview).
+- Replace `<BROWSERBASE_API_KEY>` with your real Browserbase API key.
+- Browserbase auto-creates a browser session on WebSocket connect, so no
+  manual session creation step is needed.
+- The free tier allows one concurrent session and one browser hour per month.
+  See [pricing](https://www.browserbase.com/pricing) for paid plan limits.
+- See the [Browserbase docs](https://docs.browserbase.com) for full API
+  reference, SDK guides, and integration examples.
+
+## Security
+
+Key ideas:
+
+- Browser control is loopback-only; access flows through the Gateway’s auth or node pairing.
+- If browser control is enabled and no auth is configured, IronAgent auto-generates `gateway.auth.token` on startup and persists it to config.
+- Keep the Gateway and any node hosts on a private network (Tailscale); avoid public exposure.
+- Treat remote CDP URLs/tokens as secrets; prefer env vars or a secrets manager.
+
+Remote CDP tips:
+
+- Prefer encrypted endpoints (HTTPS or WSS) and short-lived tokens where possible.
+- Avoid embedding long-lived tokens directly in config files.
+
+## Profiles (multi-browser)
+
+IronAgent supports multiple named profiles (routing configs). Profiles can be:
+
+- **ironagent-managed**: a dedicated Chromium-based browser instance with its own user data directory + CDP port
+- **remote**: an explicit CDP URL (Chromium-based browser running elsewhere)
+- **existing session**: your existing Chrome profile via Chrome DevTools MCP auto-connect
+
+Defaults:
+
+- The `ironagent` profile is auto-created if missing.
+- The `user` profile is built-in for Chrome MCP existing-session attach.
+- Existing-session profiles are opt-in beyond `user`; create them with `--driver existing-session`.
+- Local CDP ports allocate from **18800–18899** by default.
+- Deleting a profile moves its local data directory to Trash.
+
+All control endpoints accept `?profile=<name>`; the CLI uses `--browser-profile`.
+
+## Existing-session via Chrome DevTools MCP
+
+IronAgent can also attach to a running Chromium-based browser profile through the
+official Chrome DevTools MCP server. This reuses the tabs and login state
+already open in that browser profile.
+
+Official background and setup references:
+
+- [Chrome for Developers: Use Chrome DevTools MCP with your browser session](https://developer.chrome.com/blog/chrome-devtools-mcp-debug-your-browser-session)
+- [Chrome DevTools MCP README](https://github.com/ChromeDevTools/chrome-devtools-mcp)
+
+Built-in profile:
+
+- `user`
+
+Optional: create your own custom existing-session profile if you want a
+different name, color, or browser data directory.
+
+Default behavior:
+
+- The built-in `user` profile uses Chrome MCP auto-connect, which targets the
+  default local Google Chrome profile.
+
+Use `userDataDir` for Brave, Edge, Chromium, or a non-default Chrome profile:
+
+```json5
+{
+  browser: {
+    profiles: {
+      brave: {
+        driver: "existing-session",
+        attachOnly: true,
+        userDataDir: "~/Library/Application Support/BraveSoftware/Brave-Browser",
+        color: "#FB542B",
+      },
+    },
+  },
+}
+```
+
+Then in the matching browser:
+
+1. Open that browser's inspect page for remote debugging.
+2. Enable remote debugging.
+3. Keep the browser running and approve the connection prompt when IronAgent attaches.
+
+Common inspect pages:
+
+- Chrome: `chrome://inspect/#remote-debugging`
+- Brave: `brave://inspect/#remote-debugging`
+- Edge: `edge://inspect/#remote-debugging`
+
+Live attach smoke test:
+
+```bash
+ironagent browser --browser-profile user start
+ironagent browser --browser-profile user status
+ironagent browser --browser-profile user tabs
+ironagent browser --browser-profile user snapshot --format ai
+```
+
+What success looks like:
+
+- `status` shows `driver: existing-session`
+- `status` shows `transport: chrome-mcp`
+- `status` shows `running: true`
+- `tabs` lists your already-open browser tabs
+- `snapshot` returns refs from the selected live tab
+
+What to check if attach does not work:
+
+- the target Chromium-based browser is version `144+`
+- remote debugging is enabled in that browser's inspect page
+- the browser showed and you accepted the attach consent prompt
+- `ironagent doctor` migrates old extension-based browser config and checks that
+  Chrome is installed locally for default auto-connect profiles, but it cannot
+  enable browser-side remote debugging for you
+
+Agent use:
+
+- Use `profile="user"` when you need the user’s logged-in browser state.
+- If you use a custom existing-session profile, pass that explicit profile name.
+- Only choose this mode when the user is at the computer to approve the attach
+  prompt.
+- the Gateway or node host can spawn `npx chrome-devtools-mcp@latest --autoConnect`
+
+Notes:
+
+- This path is higher-risk than the isolated `ironagent` profile because it can
+  act inside your signed-in browser session.
+- IronAgent does not launch the browser for this driver; it attaches to an
+  existing session only.
+- IronAgent uses the official Chrome DevTools MCP `--autoConnect` flow here. If
+  `userDataDir` is set, IronAgent passes it through to target that explicit
+  Chromium user data directory.
+- Existing-session screenshots support page captures and `--ref` element
+  captures from snapshots, but not CSS `--element` selectors.
+- Existing-session `wait --url` supports exact, substring, and glob patterns
+  like other browser drivers. `wait --load networkidle` is not supported yet.
+- Some features still require the managed browser path, such as PDF export and
+  download interception.
+- Existing-session is host-local. If Chrome lives on a different machine or a
+  different network namespace, use remote CDP or a node host instead.
+
+## Isolation guarantees
+
+- **Dedicated user data dir**: never touches your personal browser profile.
+- **Dedicated ports**: avoids `9222` to prevent collisions with dev workflows.
+- **Deterministic tab control**: target tabs by `targetId`, not “last tab”.
+
+## Browser selection
+
+When launching locally, IronAgent picks the first available:
+
+1. Chrome
+2. Brave
+3. Edge
+4. Chromium
+5. Chrome Canary
+
+You can override with `browser.executablePath`.
+
+Platforms:
+
+- macOS: checks `/Applications` and `~/Applications`.
+- Linux: looks for `google-chrome`, `brave`, `microsoft-edge`, `chromium`, etc.
+- Windows: checks common install locations.
+
+## Control API (optional)
+
+For local integrations only, the Gateway exposes a small loopback HTTP API:
+
+- Status/start/stop: `GET /`, `POST /start`, `POST /stop`
+- Tabs: `GET /tabs`, `POST /tabs/open`, `POST /tabs/focus`, `DELETE /tabs/:targetId`
+- Snapshot/screenshot: `GET /snapshot`, `POST /screenshot`
+- Actions: `POST /navigate`, `POST /act`
+- Hooks: `POST /hooks/file-chooser`, `POST /hooks/dialog`
+- Downloads: `POST /download`, `POST /wait/download`
+- Debugging: `GET /console`, `POST /pdf`
+- Debugging: `GET /errors`, `GET /requests`, `POST /trace/start`, `POST /trace/stop`, `POST /highlight`
+- Network: `POST /response/body`
+- State: `GET /cookies`, `POST /cookies/set`, `POST /cookies/clear`
+- State: `GET /storage/:kind`, `POST /storage/:kind/set`, `POST /storage/:kind/clear`
+- Settings: `POST /set/offline`, `POST /set/headers`, `POST /set/credentials`, `POST /set/geolocation`, `POST /set/media`, `POST /set/timezone`, `POST /set/locale`, `POST /set/device`
+
+All endpoints accept `?profile=<name>`.
+
+If gateway auth is configured, browser HTTP routes require auth too:
+
+- `Authorization: Bearer <gateway token>`
+- `x-ironagent-password: <gateway password>` or HTTP Basic auth with that password
+
+### Playwright requirement
+
+Some features (navigate/act/AI snapshot/role snapshot, element screenshots, PDF) require
+Playwright. If Playwright isn’t installed, those endpoints return a clear 501
+error. ARIA snapshots and basic screenshots still work for ironagent-managed Chrome.
+
+If you see `Playwright is not available in this gateway build`, install the full
+Playwright package (not `playwright-core`) and restart the gateway, or reinstall
+IronAgent with browser support.
+
+#### Docker Playwright install
+
+If your Gateway runs in Docker, avoid `npx playwright` (npm override conflicts).
+Use the bundled CLI instead:
+
+```bash
+docker compose run --rm ironagent-cli \
+  node /app/node_modules/playwright-core/cli.js install chromium
+```
+
+To persist browser downloads, set `PLAYWRIGHT_BROWSERS_PATH` (for example,
+`/home/node/.cache/ms-playwright`) and make sure `/home/node` is persisted via
+`IRONAGENT_HOME_VOLUME` or a bind mount. See [Docker](/install/docker).
+
+## How it works (internal)
+
+High-level flow:
+
+- A small **control server** accepts HTTP requests.
+- It connects to Chromium-based browsers (Chrome/Brave/Edge/Chromium) via **CDP**.
+- For advanced actions (click/type/snapshot/PDF), it uses **Playwright** on top
+  of CDP.
+- When Playwright is missing, only non-Playwright operations are available.
+
+This design keeps the agent on a stable, deterministic interface while letting
+you swap local/remote browsers and profiles.
+
+## CLI quick reference
+
+All commands accept `--browser-profile <name>` to target a specific profile.
+All commands also accept `--json` for machine-readable output (stable payloads).
+
+Basics:
+
+- `ironagent browser status`
+- `ironagent browser start`
+- `ironagent browser stop`
+- `ironagent browser tabs`
+- `ironagent browser tab`
+- `ironagent browser tab new`
+- `ironagent browser tab select 2`
+- `ironagent browser tab close 2`
+- `ironagent browser open https://example.com`
+- `ironagent browser focus abcd1234`
+- `ironagent browser close abcd1234`
+
+Inspection:
+
+- `ironagent browser screenshot`
+- `ironagent browser screenshot --full-page`
+- `ironagent browser screenshot --ref 12`
+- `ironagent browser screenshot --ref e12`
+- `ironagent browser snapshot`
+- `ironagent browser snapshot --format aria --limit 200`
+- `ironagent browser snapshot --interactive --compact --depth 6`
+- `ironagent browser snapshot --efficient`
+- `ironagent browser snapshot --labels`
+- `ironagent browser snapshot --selector "#main" --interactive`
+- `ironagent browser snapshot --frame "iframe#main" --interactive`
+- `ironagent browser console --level error`
+- `ironagent browser errors --clear`
+- `ironagent browser requests --filter api --clear`
+- `ironagent browser pdf`
+- `ironagent browser responsebody "**/api" --max-chars 5000`
+
+Actions:
+
+- `ironagent browser navigate https://example.com`
+- `ironagent browser resize 1280 720`
+- `ironagent browser click 12 --double`
+- `ironagent browser click e12 --double`
+- `ironagent browser type 23 "hello" --submit`
+- `ironagent browser press Enter`
+- `ironagent browser hover 44`
+- `ironagent browser scrollintoview e12`
+- `ironagent browser drag 10 11`
+- `ironagent browser select 9 OptionA OptionB`
+- `ironagent browser download e12 report.pdf`
+- `ironagent browser waitfordownload report.pdf`
+- `ironagent browser upload /tmp/ironagent/uploads/file.pdf`
+- `ironagent browser fill --fields '[{"ref":"1","type":"text","value":"Ada"}]'`
+- `ironagent browser dialog --accept`
+- `ironagent browser wait --text "Done"`
+- `ironagent browser wait "#main" --url "**/dash" --load networkidle --fn "window.ready===true"`
+- `ironagent browser evaluate --fn '(el) => el.textContent' --ref 7`
+- `ironagent browser highlight e12`
+- `ironagent browser trace start`
+- `ironagent browser trace stop`
+
+State:
+
+- `ironagent browser cookies`
+- `ironagent browser cookies set session abc123 --url "https://example.com"`
+- `ironagent browser cookies clear`
+- `ironagent browser storage local get`
+- `ironagent browser storage local set theme dark`
+- `ironagent browser storage session clear`
+- `ironagent browser set offline on`
+- `ironagent browser set headers --headers-json '{"X-Debug":"1"}'`
+- `ironagent browser set credentials user pass`
+- `ironagent browser set credentials --clear`
+- `ironagent browser set geo 37.7749 -122.4194 --origin "https://example.com"`
+- `ironagent browser set geo --clear`
+- `ironagent browser set media dark`
+- `ironagent browser set timezone America/New_York`
+- `ironagent browser set locale en-US`
+- `ironagent browser set device "iPhone 14"`
+
+Notes:
+
+- `upload` and `dialog` are **arming** calls; run them before the click/press
+  that triggers the chooser/dialog.
+- Download and trace output paths are constrained to IronAgent temp roots:
+  - traces: `/tmp/ironagent` (fallback: `${os.tmpdir()}/ironagent`)
+  - downloads: `/tmp/ironagent/downloads` (fallback: `${os.tmpdir()}/ironagent/downloads`)
+- Upload paths are constrained to an IronAgent temp uploads root:
+  - uploads: `/tmp/ironagent/uploads` (fallback: `${os.tmpdir()}/ironagent/uploads`)
+- `upload` can also set file inputs directly via `--input-ref` or `--element`.
+- `snapshot`:
+  - `--format ai` (default when Playwright is installed): returns an AI snapshot with numeric refs (`aria-ref="<n>"`).
+  - `--format aria`: returns the accessibility tree (no refs; inspection only).
+  - `--efficient` (or `--mode efficient`): compact role snapshot preset (interactive + compact + depth + lower maxChars).
+  - Config default (tool/CLI only): set `browser.snapshotDefaults.mode: "efficient"` to use efficient snapshots when the caller does not pass a mode (see [Gateway configuration](/gateway/configuration-reference#browser)).
+  - Role snapshot options (`--interactive`, `--compact`, `--depth`, `--selector`) force a role-based snapshot with refs like `ref=e12`.
+  - `--frame "<iframe selector>"` scopes role snapshots to an iframe (pairs with role refs like `e12`).
+  - `--interactive` outputs a flat, easy-to-pick list of interactive elements (best for driving actions).
+  - `--labels` adds a viewport-only screenshot with overlayed ref labels (prints `MEDIA:<path>`).
+- `click`/`type`/etc require a `ref` from `snapshot` (either numeric `12` or role ref `e12`).
+  CSS selectors are intentionally not supported for actions.
+
+## Snapshots and refs
+
+IronAgent supports two “snapshot” styles:
+
+- **AI snapshot (numeric refs)**: `ironagent browser snapshot` (default; `--format ai`)
+  - Output: a text snapshot that includes numeric refs.
+  - Actions: `ironagent browser click 12`, `ironagent browser type 23 "hello"`.
+  - Internally, the ref is resolved via Playwright’s `aria-ref`.
+
+- **Role snapshot (role refs like `e12`)**: `ironagent browser snapshot --interactive` (or `--compact`, `--depth`, `--selector`, `--frame`)
+  - Output: a role-based list/tree with `[ref=e12]` (and optional `[nth=1]`).
+  - Actions: `ironagent browser click e12`, `ironagent browser highlight e12`.
+  - Internally, the ref is resolved via `getByRole(...)` (plus `nth()` for duplicates).
+  - Add `--labels` to include a viewport screenshot with overlayed `e12` labels.
+
+Ref behavior:
+
+- Refs are **not stable across navigations**; if something fails, re-run `snapshot` and use a fresh ref.
+- If the role snapshot was taken with `--frame`, role refs are scoped to that iframe until the next role snapshot.
+
+## Wait power-ups
+
+You can wait on more than just time/text:
+
+- Wait for URL (globs supported by Playwright):
+  - `ironagent browser wait --url "**/dash"`
+- Wait for load state:
+  - `ironagent browser wait --load networkidle`
+- Wait for a JS predicate:
+  - `ironagent browser wait --fn "window.ready===true"`
+- Wait for a selector to become visible:
+  - `ironagent browser wait "#main"`
+
+These can be combined:
+
+```bash
+ironagent browser wait "#main" \
+  --url "**/dash" \
+  --load networkidle \
+  --fn "window.ready===true" \
+  --timeout-ms 15000
+```
+
+## Debug workflows
+
+When an action fails (e.g. “not visible”, “strict mode violation”, “covered”):
+
+1. `ironagent browser snapshot --interactive`
+2. Use `click <ref>` / `type <ref>` (prefer role refs in interactive mode)
+3. If it still fails: `ironagent browser highlight <ref>` to see what Playwright is targeting
+4. If the page behaves oddly:
+   - `ironagent browser errors --clear`
+   - `ironagent browser requests --filter api --clear`
+5. For deep debugging: record a trace:
+   - `ironagent browser trace start`
+   - reproduce the issue
+   - `ironagent browser trace stop` (prints `TRACE:<path>`)
+
+## JSON output
+
+`--json` is for scripting and structured tooling.
+
+Examples:
+
+```bash
+ironagent browser status --json
+ironagent browser snapshot --interactive --json
+ironagent browser requests --filter api --json
+ironagent browser cookies --json
+```
+
+Role snapshots in JSON include `refs` plus a small `stats` block (lines/chars/refs/interactive) so tools can reason about payload size and density.
+
+## State and environment knobs
+
+These are useful for “make the site behave like X” workflows:
+
+- Cookies: `cookies`, `cookies set`, `cookies clear`
+- Storage: `storage local|session get|set|clear`
+- Offline: `set offline on|off`
+- Headers: `set headers --headers-json '{"X-Debug":"1"}'` (legacy `set headers --json '{"X-Debug":"1"}'` remains supported)
+- HTTP basic auth: `set credentials user pass` (or `--clear`)
+- Geolocation: `set geo <lat> <lon> --origin "https://example.com"` (or `--clear`)
+- Media: `set media dark|light|no-preference|none`
+- Timezone / locale: `set timezone ...`, `set locale ...`
+- Device / viewport:
+  - `set device "iPhone 14"` (Playwright device presets)
+  - `set viewport 1280 720`
+
+## Security & privacy
+
+- The ironagent browser profile may contain logged-in sessions; treat it as sensitive.
+- `browser act kind=evaluate` / `ironagent browser evaluate` and `wait --fn`
+  execute arbitrary JavaScript in the page context. Prompt injection can steer
+  this. Disable it with `browser.evaluateEnabled=false` if you do not need it.
+- For logins and anti-bot notes (X/Twitter, etc.), see [Browser login + X/Twitter posting](/tools/browser-login).
+- Keep the Gateway/node host private (loopback or tailnet-only).
+- Remote CDP endpoints are powerful; tunnel and protect them.
+
+Strict-mode example (block private/internal destinations by default):
+
+```json5
+{
+  browser: {
+    ssrfPolicy: {
+      dangerouslyAllowPrivateNetwork: false,
+      hostnameAllowlist: ["*.example.com", "example.com"],
+      allowedHostnames: ["localhost"], // optional exact allow
+    },
+  },
+}
+```
+
+## Troubleshooting
+
+For Linux-specific issues (especially snap Chromium), see
+[Browser troubleshooting](/tools/browser-linux-troubleshooting).
+
+For WSL2 Gateway + Windows Chrome split-host setups, see
+[WSL2 + Windows + remote Chrome CDP troubleshooting](/tools/browser-wsl2-windows-remote-cdp-troubleshooting).
+
+## Agent tools + how control works
+
+The agent gets **one tool** for browser automation:
+
+- `browser` — status/start/stop/tabs/open/focus/close/snapshot/screenshot/navigate/act
+
+How it maps:
+
+- `browser snapshot` returns a stable UI tree (AI or ARIA).
+- `browser act` uses the snapshot `ref` IDs to click/type/drag/select.
+- `browser screenshot` captures pixels (full page or element).
+- `browser` accepts:
+  - `profile` to choose a named browser profile (ironagent, chrome, or remote CDP).
+  - `target` (`sandbox` | `host` | `node`) to select where the browser lives.
+  - In sandboxed sessions, `target: "host"` requires `agents.defaults.sandbox.browser.allowHostControl=true`.
+  - If `target` is omitted: sandboxed sessions default to `sandbox`, non-sandbox sessions default to `host`.
+  - If a browser-capable node is connected, the tool may auto-route to it unless you pin `target="host"` or `target="node"`.
+
+This keeps the agent deterministic and avoids brittle selectors.
+
+## Related
+
+- [Tools Overview](/tools) — all available agent tools
+- [Sandboxing](/gateway/sandboxing) — browser control in sandboxed environments
+- [Security](/gateway/security) — browser control risks and hardening

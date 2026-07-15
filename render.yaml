@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: ironagent
+    runtime: docker
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: IRONAGENT_GATEWAY_PORT
+        value: "8080"
+      - key: IRONAGENT_STATE_DIR
+        value: /data/.ironagent
+      - key: IRONAGENT_WORKSPACE_DIR
+        value: /data/workspace
+      - key: IRONAGENT_GATEWAY_TOKEN
+        generateValue: true
+    disk:
+      name: ironagent-data
+      mountPath: /data
+      sizeGB: 1

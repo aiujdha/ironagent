@@ -1,0 +1,9 @@
+{
+  "id": "ironagent-bridge",
+  "enabledByDefault": true,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

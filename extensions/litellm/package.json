@@ -1,0 +1,12 @@
+{
+  "name": "@ironagent/litellm-provider",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent LiteLLM provider plugin",
+  "type": "module",
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

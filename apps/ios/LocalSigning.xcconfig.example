@@ -1,0 +1,15 @@
+// Copy to LocalSigning.xcconfig for personal local signing overrides.
+// This file is only an example and should stay committed.
+
+IRONAGENT_CODE_SIGN_STYLE = Automatic
+IRONAGENT_DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+IRONAGENT_APP_BUNDLE_ID = ai.ironagent.client
+IRONAGENT_SHARE_BUNDLE_ID = ai.ironagent.client.share
+IRONAGENT_ACTIVITY_WIDGET_BUNDLE_ID = ai.ironagent.client.activitywidget
+IRONAGENT_WATCH_APP_BUNDLE_ID = ai.ironagent.client.watchkitapp
+IRONAGENT_WATCH_EXTENSION_BUNDLE_ID = ai.ironagent.client.watchkitapp.extension
+
+// Leave empty with automatic signing.
+IRONAGENT_APP_PROFILE =
+IRONAGENT_SHARE_PROFILE =

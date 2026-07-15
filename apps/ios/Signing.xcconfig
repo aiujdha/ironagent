@@ -1,0 +1,22 @@
+// Default signing values for shared/repo builds.
+// Auto-selected local team overrides live in .local-signing.xcconfig (git-ignored).
+// Manual local overrides can go in LocalSigning.xcconfig (git-ignored).
+
+#include "Config/Version.xcconfig"
+
+IRONAGENT_CODE_SIGN_STYLE = Manual
+IRONAGENT_DEVELOPMENT_TEAM = Y5PE65HELJ
+
+IRONAGENT_APP_BUNDLE_ID = ai.ironagent.client
+IRONAGENT_SHARE_BUNDLE_ID = ai.ironagent.client.share
+IRONAGENT_WATCH_APP_BUNDLE_ID = ai.ironagent.client.watchkitapp
+IRONAGENT_WATCH_EXTENSION_BUNDLE_ID = ai.ironagent.client.watchkitapp.extension
+IRONAGENT_ACTIVITY_WIDGET_BUNDLE_ID = ai.ironagent.client.activitywidget
+
+IRONAGENT_APP_PROFILE = ai.ironagent.client Development
+IRONAGENT_SHARE_PROFILE = ai.ironagent.client.share Development
+
+// Keep local includes after defaults: xcconfig is evaluated top-to-bottom,
+// so later assignments in local files override the defaults above.
+#include? ".local-signing.xcconfig"
+#include? "LocalSigning.xcconfig"

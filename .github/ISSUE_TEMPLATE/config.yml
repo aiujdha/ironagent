@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Onboarding
+    url: https://discord.gg/irond
+    about: "New to IronAgent? Join Discord for setup guidance in #help."
+  - name: Support
+    url: https://discord.gg/irond
+    about: "Get help from the IronAgent community on Discord in #help."

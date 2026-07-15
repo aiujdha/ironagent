@@ -1,0 +1,35 @@
+node_modules
+**/node_modules/
+
+# Build artifacts
+dist
+dist-runtime/
+.tsbuildinfo
+.pnpm-store
+*.bun-build
+
+# Swift / Xcode
+**/.build/
+**/.swiftpm/
+**/.derivedData/
+**/*.xcodeproj/xcuserdata/
+**/*.xcworkspace/xcuserdata/
+**/.local-signing.xcconfig
+
+# Android
+apps/android/app/build/
+
+# macOS / IDE noise
+.DS_Store
+.idea/
+.omc/
+
+# Optional vendored source (we commit the prebuilt bundle instead)
+vendor/
+
+# Local-only state
+.env
+.env.local
+
+# Local agent harness state (Claude Code etc)
+.claude/

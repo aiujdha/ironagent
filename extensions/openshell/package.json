@@ -1,0 +1,12 @@
+{
+  "name": "@ironagent/openshell-sandbox",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent OpenShell sandbox backend",
+  "type": "module",
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

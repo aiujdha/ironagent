@@ -1,0 +1,35 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - gateway-deployment.yaml
+  - gateway-service.yaml
+  - cli-deployment.yaml
+  - admin-deployment.yaml
+  - admin-service.yaml
+  - security-service-deployment.yaml
+  - security-service-service.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: workspace-template-files
+    files:
+      - AGENTS.md=files/templates/AGENTS.md
+      - BOOTSTRAP.md=files/templates/BOOTSTRAP.md
+      - HEARTBEAT.md=files/templates/HEARTBEAT.md
+      - IDENTITY.md=files/templates/IDENTITY.md
+      - SOUL.md=files/templates/SOUL.md
+      - TOOLS.md=files/templates/TOOLS.md
+      - USER.md=files/templates/USER.md
+  - name: runtime-provisioner-hotfix
+    files:
+      - provisioner.py=files/hotfix/provisioner.py
+  - name: security-service-app-hotfix
+    files:
+      - app.py=files/hotfix/security-service-app.py
+  - name: runtime-command-files
+    files:
+      - ironagent-docker=files/runtime/ironagent-docker.sh

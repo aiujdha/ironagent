@@ -1,0 +1,12 @@
+{
+  "name": "@ironagent/sglang-provider",
+  "version": "2026.4.1-beta.1",
+  "private": true,
+  "description": "IronAgent SGLang provider plugin",
+  "type": "module",
+  "ironagent": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ironagent-gateway
+spec:
+  type: NodePort
+  ports:
+    - name: gateway
+      port: 18789
+      targetPort: gateway
+      nodePort: 30789
+    - name: bridge
+      port: 18790
+      targetPort: bridge
+      nodePort: 30790

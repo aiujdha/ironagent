@@ -1,0 +1,27 @@
+[extend]
+useDefault = true
+
+# These exact files contain synthetic credentials or key-shaped strings used to
+# verify redaction, TLS, authentication, and documentation behavior.
+[allowlist]
+description = "Synthetic test fixtures and documented placeholders"
+paths = [
+  '''^docs/gateway/configuration-reference\.md$''',
+  '''^docs/gateway/openai-http-api\.md$''',
+  '''^docs/gateway/openresponses-http-api\.md$''',
+  '''^docs/providers/litellm\.md$''',
+  '''^src/acp/persistent-bindings\.test\.ts$''',
+  '''^src/agents/sandbox/ssh\.test\.ts$''',
+  '''^src/auto-reply/reply\.directive\.directive-behavior\.prefers-alias-matches-fuzzy-selection-is-ambiguous\.test\.ts$''',
+  '''^src/config/env-preserve-io\.test\.ts$''',
+  '''^src/config/redact-snapshot\.schema\.test\.ts$''',
+  '''^src/config/redact-snapshot\.test\.ts$''',
+  '''^src/cron/isolated-agent\.auth-profile-propagation\.test\.ts$''',
+  '''^src/gateway/client\.watchdog\.test\.ts$''',
+  '''^src/gateway/server\.preauth-hardening\.test\.ts$''',
+  '''^src/infra/outbound/outbound-session\.test\.ts$''',
+  '''^src/infra/push-apns\.auth\.test\.ts$''',
+  '''^src/infra/tls/gateway\.test\.ts$''',
+  '''^src/logging/redact\.test\.ts$''',
+  '''^src/security/audit\.test\.ts$''',
+]

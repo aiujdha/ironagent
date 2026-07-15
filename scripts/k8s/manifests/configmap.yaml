@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ironagent-config
+  labels:
+    app: ironagent
+data:
+  ironagent.json: |
+    {
+      "gateway": {
+        "mode": "local",
+        "bind": "loopback",
+        "port": 18789,
+        "auth": {
+          "mode": "token"
+        },
+        "controlUi": {
+          "enabled": true
+        }
+      },
+      "agents": {
+        "defaults": {
+          "workspace": "~/.ironagent/workspace"
+        },
+        "list": [
+          {
+            "id": "default",
+            "name": "IronAgent Assistant",
+            "workspace": "~/.ironagent/workspace"
+          }
+        ]
+      },
+      "cron": { "enabled": false }
+    }
+  AGENTS.md: |
+    # IronAgent Assistant
+
+    You are a helpful AI assistant running in Kubernetes.
